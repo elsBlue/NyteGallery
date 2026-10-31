@@ -1057,6 +1057,8 @@ private fun BoxWithConstraintsFill(
         val cardWidth = maxWidth * if (compact) 0.42f else 0.62f
         val cardHeight = cardWidth * 1.32f
         val radiusPx = with(density) { (maxWidth * if (compact) 0.34f else 0.52f).toPx() }
+        val fillWidth = with(density) { (maxWidth * 0.62f * 1.17f).roundToPx() }.coerceIn(1, 2048)
+        val fillHeight = (fillWidth * 1.32f).roundToInt()
         val count = photos.size
         if (count == 0) return@BoxWithConstraints
         val center = rotation / (360f / count)
@@ -1084,6 +1086,8 @@ private fun BoxWithConstraintsFill(
                 photo = photo,
                 featured = index == activeIndex,
                 onOpen = onOpen,
+                fillWidth = fillWidth,
+                fillHeight = fillHeight,
                 modifier = Modifier
                     .align(Alignment.Center)
                     .zIndex(depth)
@@ -1115,6 +1119,8 @@ private fun PortraitWindow(
     photo: GalleryPhoto,
     featured: Boolean,
     onOpen: () -> Unit,
+    fillWidth: Int,
+    fillHeight: Int,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier) {
@@ -1157,7 +1163,7 @@ private fun PortraitWindow(
                 .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
                 .background(Color(0xFFD9D3CC)),
         ) {
-            PhotoImage(photo, Modifier.fillMaxSize())
+            PhotoImage(photo, Modifier.fillMaxSize(), maxEdge = fillWidth, fillHeight = fillHeight)
             if (featured) {
                 Box(
                     Modifier
@@ -1261,13 +1267,16 @@ private fun PhotoImage(
     modifier: Modifier,
     contentScale: ContentScale = ContentScale.Crop,
     maxEdge: Int = 1080,
+    fillHeight: Int = maxEdge,
 ) {
     if (photo.vaultFile != null) {
         val context = LocalContext.current
-        var bitmap by remember(photo.vaultFile, maxEdge) { mutableStateOf<ImageBitmap?>(null) }
-        LaunchedEffect(photo.vaultFile, maxEdge) {
+        val fill = contentScale == ContentScale.Crop
+        var bitmap by remember(photo.vaultFile, maxEdge, fillHeight, fill) { mutableStateOf<ImageBitmap?>(null) }
+        LaunchedEffect(photo.vaultFile, maxEdge, fillHeight, fill) {
             val decoded = withContext(vaultDecodeDispatcher) {
-                VaultStore(context).decode(photo, maxEdge)
+                val store = VaultStore(context)
+                if (fill) store.decodeFill(photo, maxEdge, fillHeight) else store.decode(photo, maxEdge)
             }
             bitmap = decoded?.asImageBitmap()
         }

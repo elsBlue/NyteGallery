@@ -3,10 +3,12 @@ package com.example.saogallery.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.LruCache
+import androidx.exifinterface.media.ExifInterface
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
@@ -24,6 +26,8 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 internal const val VAULT_THUMB_EDGE = 384
+private const val DECODE_MAX_SIDE = 4096
+private const val DECODE_MAX_PIXELS = 12_000_000L
 
 class VaultStore(context: Context) {
     private val dir = File(context.filesDir, "vault").apply {
@@ -94,14 +98,27 @@ class VaultStore(context: Context) {
         val name = photo.vaultFile ?: return null
         val file = File(dir, name)
         if (!file.isFile) return null
-        val key = "${photo.id}:$maxEdge"
+        val key = "${photo.id}:v2:fit:$maxEdge"
         ThumbMemory.get(key)?.let { return it }
-        val bitmap = if (maxEdge <= VAULT_THUMB_EDGE) {
+        val bitmap = decodeEncrypted(file, maxEdge, maxEdge, fill = false)
+        if (bitmap != null) ThumbMemory.put(key, bitmap)
+        return bitmap
+    }
+
+    fun decodeFill(photo: GalleryPhoto, width: Int, height: Int): Bitmap? {
+        val name = photo.vaultFile ?: return null
+        val file = File(dir, name)
+        if (!file.isFile) return null
+        val w = width.coerceAtLeast(1)
+        val h = height.coerceAtLeast(1)
+        val key = "${photo.id}:v2:fill:${w}x$h"
+        ThumbMemory.get(key)?.let { return it }
+        val bitmap = if (w == h && w <= VAULT_THUMB_EDGE) {
             ensureThumb(photo)
             val thumb = thumbFile(name)
-            if (thumb.isFile) decodeEncrypted(thumb, maxEdge) else decodeEncrypted(file, maxEdge)
+            if (thumb.isFile) decodeEncrypted(thumb, w, h, fill = true) else decodeEncrypted(file, w, h, fill = true)
         } else {
-            decodeEncrypted(file, maxEdge)
+            decodeEncrypted(file, w, h, fill = true)
         }
         if (bitmap != null) ThumbMemory.put(key, bitmap)
         return bitmap
@@ -111,12 +128,13 @@ class VaultStore(context: Context) {
         val name = photo.vaultFile ?: return
         val lock = ThumbGate.locks.computeIfAbsent(name) { Any() }
         synchronized(lock) {
+            legacyThumbFile(name).delete()
             val dest = thumbFile(name)
             if (dest.isFile && dest.length() > IV_BYTES + TAG_BYTES) return
-            val sampled = decodeEncrypted(File(dir, name), VAULT_THUMB_EDGE) ?: return
+            val sampled = decodeEncrypted(File(dir, name), VAULT_THUMB_EDGE, VAULT_THUMB_EDGE, fill = true) ?: return
             var fitted: Bitmap? = null
             try {
-                fitted = fit(sampled, VAULT_THUMB_EDGE)
+                fitted = centerSquare(sampled, VAULT_THUMB_EDGE)
                 val jpeg = ByteArrayOutputStream()
                 if (fitted.compress(Bitmap.CompressFormat.JPEG, 72, jpeg)) {
                     val bytes = jpeg.toByteArray()
@@ -150,6 +168,7 @@ class VaultStore(context: Context) {
         val thumb = thumbFile(name)
         thumb.delete()
         File(dir, thumb.name + ".tmp").delete()
+        legacyThumbFile(name).delete()
         ThumbMemory.drop(photo.id)
     }
 
@@ -202,6 +221,11 @@ class VaultStore(context: Context) {
 
     private fun thumbFile(vaultName: String): File {
         val id = vaultName.removeSuffix(".nyt")
+        return File(dir, "$id.thumb2.nyt")
+    }
+
+    private fun legacyThumbFile(vaultName: String): File {
+        val id = vaultName.removeSuffix(".nyt")
         return File(dir, "$id.thumb.nyt")
     }
 
@@ -236,7 +260,7 @@ class VaultStore(context: Context) {
         }
     }
 
-    private fun decodeEncrypted(file: File, maxEdge: Int): Bitmap? {
+    private fun decodeEncrypted(file: File, width: Int, height: Int, fill: Boolean): Bitmap? {
         if (!file.isFile || file.length() < IV_BYTES + TAG_BYTES) return null
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         try {
@@ -245,8 +269,36 @@ class VaultStore(context: Context) {
             return null
         }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val orientation = readOrientation(file)
+        val turned = orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+            orientation == ExifInterface.ORIENTATION_ROTATE_270 ||
+            orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
+            orientation == ExifInterface.ORIENTATION_TRANSVERSE
+        val srcWidth = if (turned) bounds.outHeight else bounds.outWidth
+        val srcHeight = if (turned) bounds.outWidth else bounds.outHeight
         var sample = 1
-        while (bounds.outWidth / sample > maxEdge || bounds.outHeight / sample > maxEdge) sample *= 2
+        if (fill) {
+            val need = maxOf(width.toFloat() / srcWidth, height.toFloat() / srcHeight)
+            val needWidth = srcWidth * need
+            val needHeight = srcHeight * need
+            while (srcWidth / (sample * 2) >= needWidth && srcHeight / (sample * 2) >= needHeight) sample *= 2
+        } else {
+            while (srcWidth / sample > width || srcHeight / sample > height) sample *= 2
+        }
+        while (
+            srcWidth / sample > DECODE_MAX_SIDE ||
+            srcHeight / sample > DECODE_MAX_SIDE ||
+            (srcWidth / sample).toLong() * (srcHeight / sample) > DECODE_MAX_PIXELS
+        ) sample *= 2
+        val decoded = decodeSampled(file, sample) ?: return null
+        return try {
+            shape(decoded, orientation, turned, width, height, fill)
+        } catch (_: Throwable) {
+            decoded
+        }
+    }
+
+    private fun decodeSampled(file: File, sample: Int): Bitmap? {
         val options = BitmapFactory.Options().apply { inSampleSize = sample }
         val input = plainStream(file) ?: return null
         return try {
@@ -264,15 +316,54 @@ class VaultStore(context: Context) {
         }
     }
 
-    private fun fit(bitmap: Bitmap, maxEdge: Int): Bitmap {
-        val width = bitmap.width
-        val height = bitmap.height
-        val edge = maxOf(width, height)
-        if (edge <= maxEdge || edge <= 0) return bitmap
-        val nextWidth = maxOf(1, width * maxEdge / edge)
-        val nextHeight = maxOf(1, height * maxEdge / edge)
-        if (nextWidth == width && nextHeight == height) return bitmap
-        return Bitmap.createScaledBitmap(bitmap, nextWidth, nextHeight, true)
+    private fun readOrientation(file: File): Int = try {
+        plainStream(file)?.use {
+            ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } ?: ExifInterface.ORIENTATION_NORMAL
+    } catch (_: Exception) {
+        ExifInterface.ORIENTATION_NORMAL
+    }
+
+    private fun shape(bitmap: Bitmap, orientation: Int, turned: Boolean, width: Int, height: Int, fill: Boolean): Bitmap {
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(-90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(-90f)
+        }
+        val shownWidth = if (turned) bitmap.height else bitmap.width
+        val shownHeight = if (turned) bitmap.width else bitmap.height
+        val scale = if (fill) {
+            maxOf(width.toFloat() / shownWidth, height.toFloat() / shownHeight)
+        } else {
+            minOf(width.toFloat() / shownWidth, height.toFloat() / shownHeight)
+        }
+        if (scale < 0.9f) matrix.postScale(scale, scale)
+        if (matrix.isIdentity) return bitmap
+        val shaped = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        if (shaped !== bitmap && !bitmap.isRecycled) bitmap.recycle()
+        return shaped
+    }
+
+    private fun centerSquare(bitmap: Bitmap, edge: Int): Bitmap {
+        val side = minOf(bitmap.width, bitmap.height)
+        if (side <= 0) return bitmap
+        val left = (bitmap.width - side) / 2
+        val top = (bitmap.height - side) / 2
+        val matrix = Matrix()
+        if (side > edge) matrix.postScale(edge.toFloat() / side, edge.toFloat() / side)
+        if (left == 0 && top == 0 && matrix.isIdentity) return bitmap
+        return Bitmap.createBitmap(bitmap, left, top, side, side, matrix, true)
     }
 
     private fun openDecrypt(photo: GalleryPhoto): GcmPlainStream? {
@@ -442,7 +533,6 @@ private object ThumbGate {
 }
 
 private object ThumbMemory {
-    private val edges = intArrayOf(VAULT_THUMB_EDGE, 1080, 2400)
     private val cache = object : LruCache<String, Bitmap>(budget()) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount.coerceAtLeast(1)
     }
@@ -455,11 +545,11 @@ private object ThumbMemory {
     fun get(key: String): Bitmap? = cache.get(key)?.takeIf { !it.isRecycled }
 
     fun put(key: String, bitmap: Bitmap) {
-        if (bitmap.isRecycled || bitmap.allocationByteCount > 5 * 1024 * 1024) return
+        if (bitmap.isRecycled || bitmap.allocationByteCount > 8 * 1024 * 1024) return
         cache.put(key, bitmap)
     }
 
     fun drop(id: String) {
-        edges.forEach { cache.remove("$id:$it") }
+        cache.snapshot().keys.filter { it.startsWith("$id:") }.forEach { cache.remove(it) }
     }
 }
