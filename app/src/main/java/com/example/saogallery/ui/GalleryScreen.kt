@@ -175,7 +175,7 @@ fun GalleryScreen(
     onRestore: (String) -> Unit,
     onEmptyTrash: () -> Unit,
     onExport: (Set<String>, (Int) -> Unit) -> Unit,
-    onBackup: (String, String, (Int) -> Unit) -> Unit,
+    onBackup: (String, String, (BackupOutcome) -> Unit) -> Unit,
     onRestoreBackup: (String, String, (RestoreOutcome) -> Unit) -> Unit,
     trashExplained: () -> Boolean,
     onTrashExplained: () -> Unit,
@@ -268,16 +268,15 @@ fun GalleryScreen(
             return@rememberLauncherForActivityResult
         }
         backupBusy = true
-        onBackup(uri.toString(), secret) { count ->
+        onBackup(uri.toString(), secret) { outcome ->
             backupBusy = false
-            when {
-                count > 0 -> {
-                    Toast.makeText(context, "Backup saved. Keep that password. Nyte cannot recover it.", Toast.LENGTH_LONG).show()
-                    backupOpen = false
-                    backupError = null
-                }
-                count == 0 -> backupError = "Nothing to back up yet"
-                else -> backupError = "Couldn't write that backup"
+            if (outcome.problem == null && outcome.saved > 0) {
+                val extra = if (outcome.left > 0) " ${outcome.left} photos couldn't be read and were left out." else ""
+                Toast.makeText(context, "Backup saved with ${outcome.saved} photos.$extra Keep that password. Nyte cannot recover it.", Toast.LENGTH_LONG).show()
+                backupOpen = false
+                backupError = null
+            } else {
+                backupError = outcome.problem ?: "Couldn't write that backup"
             }
         }
     }

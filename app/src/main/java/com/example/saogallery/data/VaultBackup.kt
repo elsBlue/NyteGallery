@@ -42,6 +42,7 @@ object VaultBackup {
     sealed class ReadResult {
         data class Ok(val added: Int) : ReadResult()
         data object BadPassword : ReadResult()
+        data object NotBackup : ReadResult()
         data class Damaged(val added: Int) : ReadResult()
     }
 
@@ -102,8 +103,9 @@ object VaultBackup {
         onEntry: (Entry) -> Unit,
     ): ReadResult {
         val header = ByteArray(HEADER)
-        if (!input.readExact(header)) return ReadResult.Damaged(0)
-        if (!header.copyOfRange(0, 8).contentEquals(MAGIC) || (header[8] != 1.toByte() && header[8] != 2.toByte()) || header[9] != 1.toByte()) {
+        if (!input.readExact(header)) return ReadResult.NotBackup
+        if (!header.copyOfRange(0, 8).contentEquals(MAGIC)) return ReadResult.NotBackup
+        if ((header[8] != 1.toByte() && header[8] != 2.toByte()) || header[9] != 1.toByte()) {
             return ReadResult.Damaged(0)
         }
         val view = DataInputStream(ByteArrayInputStream(header))

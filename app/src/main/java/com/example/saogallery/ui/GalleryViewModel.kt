@@ -51,13 +51,40 @@ data class ImportOutcome(
 
 data class TransferProgress(val label: String, val done: Int, val total: Int)
 
-data class RestoreOutcome(val added: Int, val skipped: Int, val problem: String?)
+data class RestoreOutcome(val added: Int, val skipped: Int, val problem: String?, val failed: Int = 0)
+
+/** saved > 0 with problem == null is success; left = photos that could not be read and were left out. */
+data class BackupOutcome(val saved: Int, val left: Int, val problem: String?)
+
+private class BackupProblem(message: String) : Exception(message)
+
+/** Turns a write/read failure into a sentence the user can act on. */
+private fun explainIo(error: Throwable, writing: Boolean): String {
+    val text = generateSequence(error) { it.cause }.mapNotNull { it.message }.joinToString(" ").lowercase()
+    return when {
+        error is OutOfMemoryError -> "A photo was too large to process on this phone"
+        "enospc" in text || "no space" in text || "space left" in text || "disk full" in text ->
+            if (writing) "Not enough space where the backup is saved. Free up space or pick another place"
+            else "Not enough space on this phone to restore. Free up space and try again"
+        error is SecurityException || "eacces" in text || "permission" in text ->
+            if (writing) "Nyte is not allowed to write there. Pick another folder"
+            else "Nyte is not allowed to open that file. Pick it again"
+        error is java.io.FileNotFoundException ->
+            if (writing) "That location is no longer available. Pick another place"
+            else "That file is no longer available. Pick it again"
+        error is java.io.IOException ->
+            if (writing) "The connection to that location was lost before the backup finished. Try again, or save to this phone first"
+            else "The file stopped loading before the restore finished. Try again, or copy it to this phone first"
+        else -> if (writing) "Couldn't write that backup" else "Couldn't read that backup"
+    }
+}
 
 private data class PreparedRestore(
     val photos: List<GalleryPhoto>,
     val skipped: Int,
     val result: VaultBackup.ReadResult,
     val note: String?,
+    val failed: Int = 0,
 )
 
 sealed class DeleteStep {
@@ -410,20 +437,21 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         deleteQueue = emptyList()
     }
 
-    fun writeBackup(uriString: String, password: String, onDone: (Int) -> Unit) {
+    fun writeBackup(uriString: String, password: String, onDone: (BackupOutcome) -> Unit) {
         val photos = all.value.toList()
         if (!openTransfer("Saving backup", photos.size)) return
         viewModelScope.launch {
-            val count = try {
+            val outcome = try {
                 withContext(Dispatchers.IO) {
                     val app = getApplication<Application>()
                     val uri = Uri.parse(uriString)
                     var written = 0
+                    var left = 0
                     var finished = false
                     try {
                         val out = (try { app.contentResolver.openOutputStream(uri, "wt") } catch (_: Exception) { null })
                             ?: app.contentResolver.openOutputStream(uri)
-                            ?: return@withContext -1
+                            ?: throw BackupProblem("Couldn't open that location. Pick another place")
                         var sealed = false
                         out.use { stream ->
                             VaultBackup.begin(password, stream, photos.size).use { writer ->
@@ -433,6 +461,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                                         writer.add(VaultBackup.Entry(photo.id, photo.name, photo.takenAt, photo.trashedAt, bytes))
                                         bytes.fill(0)
                                         written++
+                                    } else {
+                                        left++
                                     }
                                     markTransfer(index + 1, photos.size)
                                 }
@@ -443,9 +473,15 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         }
                         finished = sealed
-                        if (finished) written else 0
-                    } catch (_: Exception) {
-                        -1
+                        when {
+                            finished -> BackupOutcome(written, left, null)
+                            photos.isEmpty() -> BackupOutcome(0, 0, "Nothing to back up yet")
+                            else -> BackupOutcome(0, left, "None of the photos could be read, so no backup was made")
+                        }
+                    } catch (problem: BackupProblem) {
+                        BackupOutcome(0, left, problem.message)
+                    } catch (error: Throwable) {
+                        BackupOutcome(0, left, explainIo(error, writing = true))
                     } finally {
                         if (!finished) dropDocument(uri)
                     }
@@ -453,7 +489,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             } finally {
                 closeTransfer()
             }
-            onDone(count)
+            onDone(outcome)
         }
     }
 
@@ -465,13 +501,18 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     val app = getApplication<Application>()
                     val uri = Uri.parse(uriString)
-                    val input = app.contentResolver.openInputStream(uri)
-                        ?: return@withContext PreparedRestore(emptyList(), 0, VaultBackup.ReadResult.Damaged(0), "Couldn't open that file")
+                    val input = try {
+                        app.contentResolver.openInputStream(uri)
+                    } catch (error: Exception) {
+                        return@withContext PreparedRestore(emptyList(), 0, VaultBackup.ReadResult.Damaged(0), explainIo(error, writing = false))
+                    } ?: return@withContext PreparedRestore(emptyList(), 0, VaultBackup.ReadResult.Damaged(0), "Couldn't open that file. Pick it again")
                     val existing = all.value.map { it.id }.toMutableSet()
                     val added = mutableListOf<GalleryPhoto>()
                     var skipped = 0
                     var seen = 0
-                    val result = input.use { stream ->
+                    var failed = 0
+                    var ioNote: String? = null
+                    val result = try { input.use { stream ->
                         VaultBackup.restore(password, stream, onCount = { total ->
                             markTransfer(0, total, "Restoring backup")
                         }) { entry ->
@@ -484,6 +525,7 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                                 }?.let { saved ->
                                     if (entry.trashedAt != null) saved.copy(trashedAt = entry.trashedAt) else saved
                                 }
+                                if (photo == null) failed++
                                 if (photo != null) {
                                     existing += photo.id
                                     added += photo
@@ -494,8 +536,16 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                             }
                             markTransfer(seen, _transfer.value?.total ?: seen, "Restoring backup")
                         }
+                    } } catch (error: Throwable) {
+                        ioNote = explainIo(error, writing = false)
+                        VaultBackup.ReadResult.Damaged(added.size)
                     }
-                    PreparedRestore(added, skipped, result, null)
+                    val lowSpace = app.filesDir.usableSpace < 64L * 1024 * 1024
+                    val failNote = if (failed > 0) {
+                        if (lowSpace) "Phone storage is full. $failed photos couldn't be restored. Free up space and restore again"
+                        else "$failed photos couldn't be saved. Restore again to retry them"
+                    } else null
+                    PreparedRestore(added, skipped, result, ioNote ?: failNote, failed)
                 }
             } finally {
                 closeTransfer()
@@ -506,12 +556,18 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 rotation.value = if (after.isEmpty()) 0f else index * (360f / after.size)
             }
             val outcome = when (val result = prepared.result) {
-                is VaultBackup.ReadResult.Ok -> RestoreOutcome(prepared.photos.size, prepared.skipped, prepared.note)
+                is VaultBackup.ReadResult.Ok -> RestoreOutcome(prepared.photos.size, prepared.skipped, prepared.note, prepared.failed)
                 VaultBackup.ReadResult.BadPassword -> RestoreOutcome(0, 0, "That password does not match this backup")
+                VaultBackup.ReadResult.NotBackup -> RestoreOutcome(0, 0, prepared.note ?: "That file is not a Nyte backup")
                 is VaultBackup.ReadResult.Damaged -> RestoreOutcome(
                     prepared.photos.size,
                     prepared.skipped,
-                    prepared.note ?: if (prepared.photos.isEmpty()) "That file is not a Nyte backup" else "Backup file is damaged. Restored ${prepared.photos.size} before it stopped",
+                    prepared.note ?: if (prepared.photos.isEmpty() && prepared.skipped == 0) {
+                        "This backup is damaged or incomplete and nothing could be read from it"
+                    } else {
+                        "This backup is incomplete, maybe the copy or upload didn't finish. Restored ${prepared.photos.size} photos before it stopped"
+                    },
+                    prepared.failed,
                 )
             }
             onDone(outcome)
