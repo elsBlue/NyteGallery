@@ -49,6 +49,7 @@ class MainActivity : FragmentActivity() {
                     onExport = viewModel::exportToPublic,
                     onBackup = viewModel::writeBackup,
                     onRestoreBackup = viewModel::readBackup,
+                    onVerifyBackup = viewModel::verifyBackup,
                     trashExplained = viewModel::trashExplained,
                     onTrashExplained = viewModel::markTrashExplained,
                     transfer = transfer,

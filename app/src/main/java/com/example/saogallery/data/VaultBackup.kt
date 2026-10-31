@@ -154,6 +154,17 @@ object VaultBackup {
         }
     }
 
+    /**
+     * Opens the file with the password and decrypts every entry, including the sealed trailer,
+     * without keeping any photo. Same results as [restore].
+     */
+    fun verify(
+        password: String,
+        input: InputStream,
+        onCount: (Int) -> Unit = {},
+        onEntry: () -> Unit = {},
+    ): ReadResult = restore(password, input, onCount) { onEntry() }
+
     private fun restoreStreamed(key: ByteArray, data: DataInputStream, onEntry: (Entry) -> Unit): ReadResult {
         var added = 0
         var index = 0

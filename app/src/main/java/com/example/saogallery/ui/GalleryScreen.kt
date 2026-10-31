@@ -88,6 +88,7 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.example.saogallery.R
+import com.example.saogallery.data.BackupPrefs
 import com.example.saogallery.data.GalleryPhoto
 import com.example.saogallery.data.LockStore
 import com.example.saogallery.data.VAULT_THUMB_EDGE
@@ -177,6 +178,7 @@ fun GalleryScreen(
     onExport: (Set<String>, (Int) -> Unit) -> Unit,
     onBackup: (String, String, (BackupOutcome) -> Unit) -> Unit,
     onRestoreBackup: (String, String, (RestoreOutcome) -> Unit) -> Unit,
+    onVerifyBackup: (String, String, (VerifyOutcome) -> Unit) -> Unit,
     trashExplained: () -> Boolean,
     onTrashExplained: () -> Unit,
     transfer: TransferProgress? = null,
@@ -201,6 +203,15 @@ fun GalleryScreen(
     var importBackup by remember { mutableStateOf(false) }
     var backupBusy by remember { mutableStateOf(false) }
     var backupError by remember { mutableStateOf<String?>(null) }
+    val backupPrefs = remember { BackupPrefs(context) }
+    var backupGuide by remember { mutableStateOf(false) }
+    var backupSaved by remember { mutableStateOf<SavedBackup?>(null) }
+    // Password of the backup just written, kept in memory only so "Check backup" can run once.
+    var checkSecret by remember { mutableStateOf<String?>(null) }
+    var backupChecking by remember { mutableStateOf(false) }
+    var checkNote by remember { mutableStateOf<String?>(null) }
+    var checkFailed by remember { mutableStateOf(false) }
+    var restoreNote by remember { mutableStateOf<String?>(null) }
     var pendingExportIds by remember { mutableStateOf(emptySet<String>()) }
     var draft by remember { mutableStateOf("") }
     val exitArmedUntil = remember { longArrayOf(0L) }
@@ -240,14 +251,33 @@ fun GalleryScreen(
         else Toast.makeText(context, "Photo access is needed to move images out of your gallery", Toast.LENGTH_SHORT).show()
     }
     var pendingBackupPassword by remember { mutableStateOf<String?>(null) }
+    var pendingCheckOnly by remember { mutableStateOf(false) }
     val openBackupFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val secret = pendingBackupPassword
         pendingBackupPassword = null
+        val checkOnly = pendingCheckOnly
+        pendingCheckOnly = false
         if (uri == null || secret.isNullOrEmpty()) {
             backupBusy = false
+            backupChecking = false
             return@rememberLauncherForActivityResult
         }
         backupBusy = true
+        if (checkOnly) {
+            backupChecking = true
+            onVerifyBackup(uri.toString(), secret) { outcome ->
+                backupBusy = false
+                backupChecking = false
+                if (outcome.problem == null) {
+                    backupError = null
+                    restoreNote = "Backup checked: ${outcome.photos} photos can be restored"
+                } else {
+                    restoreNote = null
+                    backupError = outcome.problem
+                }
+            }
+            return@rememberLauncherForActivityResult
+        }
         onRestoreBackup(uri.toString(), secret) { outcome ->
             backupBusy = false
             if (outcome.problem == null) {
@@ -271,10 +301,11 @@ fun GalleryScreen(
         onBackup(uri.toString(), secret) { outcome ->
             backupBusy = false
             if (outcome.problem == null && outcome.saved > 0) {
-                val extra = if (outcome.left > 0) " ${outcome.left} photos couldn't be read and were left out." else ""
-                Toast.makeText(context, "Backup saved with ${outcome.saved} photos.$extra Keep that password. Nyte cannot recover it.", Toast.LENGTH_LONG).show()
-                backupOpen = false
                 backupError = null
+                checkNote = null
+                checkFailed = false
+                checkSecret = secret
+                backupSaved = SavedBackup(uri.toString(), outcome.fileName, outcome.saved, outcome.left)
             } else {
                 backupError = outcome.problem ?: "Couldn't write that backup"
             }
@@ -320,6 +351,19 @@ fun GalleryScreen(
                 finishExport(ids)
             }
         }
+    }
+
+    LaunchedEffect(backupOpen) {
+        if (!backupOpen) {
+            backupSaved = null
+            checkSecret = null
+            checkNote = null
+            checkFailed = false
+            backupGuide = false
+        }
+    }
+    LaunchedEffect(importBackup) {
+        if (!importBackup) restoreNote = null
     }
 
     LaunchedEffect(locked) {
@@ -683,20 +727,54 @@ fun GalleryScreen(
                 onBackup = {
                     backupError = null
                     menuOpen = false
+                    backupGuide = !backupPrefs.guideSeen()
                     backupOpen = true
                 },
                 onRestore = {
                     backupError = null
+                    restoreNote = null
                     menuOpen = false
                     importBackup = true
                 },
             )
         }
-        if (backupOpen && !locked) {
+        val saved = backupSaved
+        if (backupOpen && !locked && saved != null) {
+            BackupSavedPage(
+                light = light,
+                fileName = saved.fileName,
+                saved = saved.saved,
+                left = saved.left,
+                checking = backupChecking,
+                canCheck = checkSecret != null,
+                checkNote = checkNote,
+                checkFailed = checkFailed,
+                onCheck = {
+                    val secret = checkSecret
+                    if (secret != null && !backupChecking) {
+                        backupChecking = true
+                        backupBusy = true
+                        onVerifyBackup(saved.uri, secret) { outcome ->
+                            backupChecking = false
+                            backupBusy = false
+                            checkSecret = null
+                            checkFailed = outcome.problem != null
+                            checkNote = outcome.problem ?: "Backup checked: ${outcome.photos} photos can be restored"
+                        }
+                    }
+                },
+                onDone = { if (!backupChecking) backupOpen = false },
+            )
+        } else if (backupOpen && !locked) {
             BackupPage(
                 light = light,
                 busy = backupBusy,
                 error = backupError,
+                showGuide = backupGuide,
+                onGuideDone = {
+                    backupPrefs.markGuideSeen()
+                    backupGuide = false
+                },
                 onClose = { if (!backupBusy) backupOpen = false },
                 onCreate = { secret ->
                     pendingBackupPassword = secret
@@ -710,10 +788,21 @@ fun GalleryScreen(
                 light = light,
                 busy = backupBusy,
                 error = backupError,
+                note = restoreNote,
+                checking = backupChecking,
                 onClose = { if (!backupBusy) importBackup = false },
                 onPick = { secret ->
                     pendingBackupPassword = secret
+                    pendingCheckOnly = false
                     backupError = null
+                    restoreNote = null
+                    openBackupFile.launch(arrayOf("application/octet-stream", "application/*", "*/*"))
+                },
+                onCheck = { secret ->
+                    pendingBackupPassword = secret
+                    pendingCheckOnly = true
+                    backupError = null
+                    restoreNote = null
                     openBackupFile.launch(arrayOf("application/octet-stream", "application/*", "*/*"))
                 },
             )
@@ -1893,3 +1982,5 @@ private fun clipName(text: String, max: Int): String {
     if (clean.length <= max) return clean
     return clean.take(max).trimEnd() + "..."
 }
+
+private data class SavedBackup(val uri: String, val fileName: String?, val saved: Int, val left: Int)

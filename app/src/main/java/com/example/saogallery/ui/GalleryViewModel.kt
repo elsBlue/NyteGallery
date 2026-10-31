@@ -15,6 +15,7 @@ import androidx.annotation.RequiresApi
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.saogallery.TransferNotices
+import com.example.saogallery.data.BackupPrefs
 import com.example.saogallery.data.GalleryPhoto
 import com.example.saogallery.data.VaultBackup
 import com.example.saogallery.data.VaultStore
@@ -54,7 +55,10 @@ data class TransferProgress(val label: String, val done: Int, val total: Int)
 data class RestoreOutcome(val added: Int, val skipped: Int, val problem: String?, val failed: Int = 0)
 
 /** saved > 0 with problem == null is success; left = photos that could not be read and were left out. */
-data class BackupOutcome(val saved: Int, val left: Int, val problem: String?)
+data class BackupOutcome(val saved: Int, val left: Int, val problem: String?, val fileName: String? = null)
+
+/** problem == null means every photo in the file opened with the password. */
+data class VerifyOutcome(val photos: Int, val problem: String?)
 
 private class BackupProblem(message: String) : Exception(message)
 
@@ -95,6 +99,7 @@ sealed class DeleteStep {
 
 class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     private val vault = VaultStore(app)
+    private val backupPrefs = BackupPrefs(app)
     private val all = MutableStateFlow(vault.load())
     private val rotation = MutableStateFlow(0f)
     private var settleJob: Job? = null
@@ -474,7 +479,10 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         finished = sealed
                         when {
-                            finished -> BackupOutcome(written, left, null)
+                            finished -> {
+                                backupPrefs.recordBackup(System.currentTimeMillis(), written)
+                                BackupOutcome(written, left, null, displayName(uri))
+                            }
                             photos.isEmpty() -> BackupOutcome(0, 0, "Nothing to back up yet")
                             else -> BackupOutcome(0, left, "None of the photos could be read, so no backup was made")
                         }
@@ -491,6 +499,65 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
             }
             onDone(outcome)
         }
+    }
+
+    /** Reads the whole file with the password without importing anything. */
+    fun verifyBackup(uriString: String, password: String, onDone: (VerifyOutcome) -> Unit) {
+        if (!openTransfer("Checking backup", 0)) {
+            onDone(VerifyOutcome(0, "Another task is still running. Try again when it finishes"))
+            return
+        }
+        viewModelScope.launch {
+            val outcome = try {
+                withContext(Dispatchers.IO) {
+                    val app = getApplication<Application>()
+                    val input = try {
+                        app.contentResolver.openInputStream(Uri.parse(uriString))
+                    } catch (error: Exception) {
+                        return@withContext VerifyOutcome(0, explainIo(error, writing = false))
+                    } ?: return@withContext VerifyOutcome(0, "Couldn't open that file. Pick it again")
+                    var seen = 0
+                    var ioNote: String? = null
+                    val result = try {
+                        input.use { stream ->
+                            VaultBackup.verify(password, stream, onCount = { total ->
+                                markTransfer(0, total, "Checking backup")
+                            }) {
+                                seen++
+                                markTransfer(seen, maxOf(_transfer.value?.total ?: seen, seen), "Checking backup")
+                            }
+                        }
+                    } catch (error: Throwable) {
+                        ioNote = explainIo(error, writing = false)
+                        VaultBackup.ReadResult.Damaged(seen)
+                    }
+                    when (result) {
+                        is VaultBackup.ReadResult.Ok -> VerifyOutcome(result.added, null)
+                        VaultBackup.ReadResult.BadPassword -> VerifyOutcome(0, "That password does not match this backup")
+                        VaultBackup.ReadResult.NotBackup -> VerifyOutcome(0, "That file is not a Nyte backup")
+                        is VaultBackup.ReadResult.Damaged -> VerifyOutcome(
+                            result.added,
+                            ioNote ?: if (result.added == 0) {
+                                "This backup is damaged or incomplete and nothing could be read from it"
+                            } else {
+                                "This backup is incomplete, maybe the copy or upload didn't finish. Only ${result.added} photos could be read"
+                            },
+                        )
+                    }
+                }
+            } finally {
+                closeTransfer()
+            }
+            onDone(outcome)
+        }
+    }
+
+    private fun displayName(uri: Uri): String? = try {
+        getApplication<Application>().contentResolver
+            .query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null }
+    } catch (_: Exception) {
+        null
     }
 
     fun readBackup(uriString: String, password: String, onDone: (RestoreOutcome) -> Unit) {
