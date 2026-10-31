@@ -129,6 +129,11 @@ private const val LABEL_LIMIT = 22
 private const val SCREENSHOTS_ALLOWED = true
 private val CardHeader = 34.dp
 
+// Landscape (list closed): cards live in the left share of the width, the info panel in the rest.
+private const val LandscapeStageShare = 0.58f
+private val LandscapeCardTop = 28.dp
+private val LandscapeCardBottom = 20.dp
+
 private class CardFit(val width: Dp, val shiftX: Dp, val shiftY: Dp?)
 
 private fun cardFit(shape: WindowShape, maxWidth: Dp, maxHeight: Dp, compact: Boolean, insetTop: Dp, insetBottom: Dp): CardFit {
@@ -138,13 +143,15 @@ private fun cardFit(shape: WindowShape, maxWidth: Dp, maxHeight: Dp, compact: Bo
         val band = maxHeight - if (compact) 140.dp else 400.dp
         return CardFit(minOf(byWidth, widthForBand(band)), 0.dp, null)
     }
-    val top = insetTop + 60.dp
-    val bottom = insetBottom + if (compact) 112.dp else 60.dp
+    val top = insetTop + if (compact) 60.dp else LandscapeCardTop
+    val bottom = insetBottom + if (compact) 112.dp else LandscapeCardBottom
     val band = maxHeight - top - bottom
-    val cap = if (compact) byWidth else maxWidth * 0.22f
+    // Landscape without the list: the whole carousel (featured card plus both side cards,
+    // roughly 2.42 card widths) must stay inside the left region.
+    val cap = if (compact) byWidth else (maxWidth * LandscapeStageShare - 32.dp) / 2.42f
     return CardFit(
         width = minOf(cap, widthForBand(band)),
-        shiftX = if (compact) 0.dp else maxWidth * -0.14f,
+        shiftX = if (compact) 0.dp else maxWidth * (LandscapeStageShare / 2f - 0.5f),
         shiftY = top + band / 2 - maxHeight / 2,
     )
 }
@@ -468,6 +475,14 @@ fun GalleryScreen(
                     onEdit = openRename,
                     onDelete = requestTrash,
                     onOpen = { viewing = true },
+                    panelActions = {
+                        LandscapePanelActions(
+                            chrome = chrome,
+                            chromeInk = chromeInk,
+                            onAdd = openPicker,
+                            onRestore = { restoreOpen = true },
+                        )
+                    },
                 )
             }
         }
@@ -586,7 +601,10 @@ fun GalleryScreen(
             }
         }
 
-        if (state.photos.isNotEmpty()) {
+        // Landscape with the list closed: Add Images and Restore sit in the side panel instead.
+        val actionsInPanel = shape == WindowShape.Landscape && !galleryOpen && !trashOpen &&
+            state.photos.getOrNull(state.activeIndex) != null
+        if (state.photos.isNotEmpty() && !actionsInPanel) {
             Box(
                 Modifier
                     .align(Alignment.BottomStart)
@@ -605,7 +623,7 @@ fun GalleryScreen(
         }
 
         val addAtBottom = state.photos.isNotEmpty() || (trashOpen && state.trash.isNotEmpty())
-        Row(
+        if (!actionsInPanel) Row(
             (if (addAtBottom) {
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -1092,6 +1110,7 @@ private fun Stage(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onOpen: () -> Unit,
+    panelActions: @Composable () -> Unit = {},
 ) {
     val active = state.photos.getOrNull(state.activeIndex)
     Box(Modifier.fillMaxSize()) {
@@ -1119,15 +1138,17 @@ private fun Stage(
             Column(
                 Modifier
                     .align(Alignment.CenterEnd)
+                    .fillMaxWidth(1f - LandscapeStageShare)
                     .windowInsetsPadding(WindowInsets.systemBars)
-                    .padding(end = 24.dp)
-                    .fillMaxWidth(0.34f),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .padding(start = 8.dp, end = 24.dp, top = 64.dp, bottom = 64.dp),
+                horizontalAlignment = Alignment.Start,
             ) {
                 ActiveLabel(active, ink, showPencil, onEdit)
                 if (showActions) {
                     Spacer(Modifier.height(18.dp))
                     ActionRow(Modifier, ink, onEdit, onDelete)
+                    Spacer(Modifier.height(28.dp))
+                    panelActions()
                 }
             }
         } else if (active != null) {
@@ -1161,6 +1182,43 @@ private fun Stage(
                     onDelete,
                 )
             }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun LandscapePanelActions(chrome: Color, chromeInk: Color, onAdd: () -> Unit, onRestore: () -> Unit) {
+    // Wraps onto a second line on narrow landscape phones instead of clipping.
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            Modifier
+                .height(44.dp)
+                .shadow(8.dp, CircleShape)
+                .clip(CircleShape)
+                .background(AddGreen)
+                .clickable(onClick = onAdd)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(Modifier.size(16.dp)) { PlusMark() }
+            Text("Add Images", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
+        Box(
+            Modifier
+                .height(44.dp)
+                .shadow(8.dp, CircleShape)
+                .clip(CircleShape)
+                .background(chrome)
+                .clickable(onClick = onRestore)
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Restore", color = chromeInk, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
 }
