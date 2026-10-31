@@ -1,4 +1,4 @@
-package com.example.saogallery
+package com.nytefall.nytegallery
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -10,7 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import com.example.saogallery.ui.TransferProgress
+import com.nytefall.nytegallery.ui.TransferProgress
 
 /**
  * Keeps a user-started vault transfer alive if the app is left with Home.
@@ -47,7 +47,7 @@ class TransferService : Service() {
 }
 
 object TransferNotices {
-    const val ACTION_STOP = "com.example.saogallery.STOP_TRANSFER"
+    const val ACTION_STOP = "com.nytefall.nytegallery.STOP_TRANSFER"
     const val NOTIFICATION_ID = 7101
     private const val CHANNEL = "nyte_transfer"
 

@@ -1,4 +1,4 @@
-package com.example.saogallery.ui
+package com.nytefall.nytegallery.ui
 
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells

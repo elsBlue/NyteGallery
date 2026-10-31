@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.saogallery"
+    namespace = "com.nytefall.nytegallery"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.saogallery"
+        applicationId = "com.nytefall.nytegallery"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

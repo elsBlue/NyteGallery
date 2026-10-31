@@ -1,4 +1,4 @@
-package com.example.saogallery
+package com.nytefall.nytegallery
 
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
@@ -9,10 +9,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.saogallery.ui.GalleryScreen
-import com.example.saogallery.ui.GalleryViewModel
-import com.example.saogallery.ui.LocalHostActivity
-import com.example.saogallery.ui.theme.SAOGalleryTheme
+import com.nytefall.nytegallery.ui.GalleryScreen
+import com.nytefall.nytegallery.ui.GalleryViewModel
+import com.nytefall.nytegallery.ui.LocalHostActivity
+import com.nytefall.nytegallery.ui.theme.SAOGalleryTheme
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

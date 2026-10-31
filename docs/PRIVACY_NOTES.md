@@ -6,7 +6,7 @@ so the real Privacy Policy, Terms of Service and Play Console Data safety form c
 - App: **Nyte Gallery**
 - Developer: **Nytefall Interactive**
 - Contact (planned): **nytefall.interactive@gmail.com**
-- Current package: `com.example.saogallery` (must change before Play, see Open items)
+- Current package: `com.nytefall.nytegallery` (renamed from `com.example.saogallery` on 2026-10-31)
 
 Markers used below:
 - **[CODE]** checked in the source code.
@@ -203,8 +203,8 @@ Biometric only) and in the code: **[CODE]**
 
 ## 12. Open items before Play release
 
-1. **Rename the package** from `com.example.saogallery` (Play rejects `com.example`). This changes the app identity:
-   existing installs cannot update and must back up, uninstall, then restore. Do only when decided.
+1. **Rename the package**: DONE 2026-10-31, now `com.nytefall.nytegallery`. Old `com.example.saogallery` installs are a
+   different app: back up there, install the new app, then restore.
 2. **Release signing key**: create an upload keystore, enrol in Play App Signing, keep the keystore and passwords
    **outside the public repo** (GitHub Actions secrets if CI signs). Never commit it.
 3. **Build an AAB** (`bundleRelease`) for Play; keep versionCode increasing.

@@ -1,4 +1,4 @@
-package com.example.saogallery.data
+package com.nytefall.nytegallery.data
 
 import android.content.Context
 import java.net.HttpURLConnection

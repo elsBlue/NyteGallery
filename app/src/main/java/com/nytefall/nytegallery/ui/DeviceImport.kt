@@ -1,4 +1,4 @@
-package com.example.saogallery.ui
+package com.nytefall.nytegallery.ui
 
 import android.content.ContentUris
 import android.content.Context

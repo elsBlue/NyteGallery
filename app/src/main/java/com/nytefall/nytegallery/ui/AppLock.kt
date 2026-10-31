@@ -1,4 +1,4 @@
-package com.example.saogallery.ui
+package com.nytefall.nytegallery.ui
 
 import android.content.Context
 import android.content.ContextWrapper
@@ -61,8 +61,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
-import com.example.saogallery.R
-import com.example.saogallery.data.LockStore
+import com.nytefall.nytegallery.R
+import com.nytefall.nytegallery.data.LockStore
 import kotlin.math.min
 
 private val LockPink = Color(0xFFFF4D6A)

@@ -14,7 +14,7 @@ Galeri foto Android (Kotlin + Jetpack Compose) bernama Nyte Gallery, dengan jend
 - Tombol kembali menutup daftar atau Trash, bukan aplikasinya.
 - MVVM ringan: `GalleryRepository` → `GalleryViewModel` → `GalleryScreen`.
 
-Package: `com.example.saogallery`.
+Package: `com.nytefall.nytegallery`.
 
 ## Cara menjalankan
 
@@ -29,4 +29,4 @@ APK debug ada di `app/build/outputs/apk/debug/`.
 
 ## GitHub Actions
 
-[`.github/workflows/android-build.yml`](.github/workflows/android-build.yml) berjalan pada push ke `main` dan pada pull request: Ubuntu latest, JDK 17, cache Gradle, lalu artifact `saogallery-debug-apk`.
+[`.github/workflows/android-build.yml`](.github/workflows/android-build.yml) berjalan pada push ke `main` dan pada pull request: Ubuntu latest, JDK 17, cache Gradle, lalu artifact `nytegallery-debug-apk`.

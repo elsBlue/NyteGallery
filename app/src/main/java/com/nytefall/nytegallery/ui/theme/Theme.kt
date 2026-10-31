@@ -1,4 +1,4 @@
-package com.example.saogallery.ui.theme
+package com.nytefall.nytegallery.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme

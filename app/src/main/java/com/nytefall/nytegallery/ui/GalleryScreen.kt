@@ -1,4 +1,4 @@
-package com.example.saogallery.ui
+package com.nytefall.nytegallery.ui
 
 import android.app.Activity
 import android.Manifest
@@ -87,15 +87,15 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
-import com.example.saogallery.R
-import com.example.saogallery.data.BackupPrefs
-import com.example.saogallery.data.GalleryPhoto
-import com.example.saogallery.data.LockStore
-import com.example.saogallery.data.VAULT_THUMB_EDGE
-import com.example.saogallery.data.VaultStore
-import com.example.saogallery.data.formatTaken
-import com.example.saogallery.data.sendUnlockCode
-import com.example.saogallery.data.yearOf
+import com.nytefall.nytegallery.R
+import com.nytefall.nytegallery.data.BackupPrefs
+import com.nytefall.nytegallery.data.GalleryPhoto
+import com.nytefall.nytegallery.data.LockStore
+import com.nytefall.nytegallery.data.VAULT_THUMB_EDGE
+import com.nytefall.nytegallery.data.VaultStore
+import com.nytefall.nytegallery.data.formatTaken
+import com.nytefall.nytegallery.data.sendUnlockCode
+import com.nytefall.nytegallery.data.yearOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

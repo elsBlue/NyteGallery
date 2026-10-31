@@ -1,4 +1,4 @@
-package com.example.saogallery.ui
+package com.nytefall.nytegallery.ui
 
 import android.app.Application
 import android.app.RecoverableSecurityException
@@ -14,12 +14,12 @@ import android.provider.MediaStore
 import androidx.annotation.RequiresApi
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.saogallery.TransferNotices
-import com.example.saogallery.data.BackupPrefs
-import com.example.saogallery.data.GalleryPhoto
-import com.example.saogallery.data.VaultBackup
-import com.example.saogallery.data.VaultStore
-import com.example.saogallery.data.captureMillis
+import com.nytefall.nytegallery.TransferNotices
+import com.nytefall.nytegallery.data.BackupPrefs
+import com.nytefall.nytegallery.data.GalleryPhoto
+import com.nytefall.nytegallery.data.VaultBackup
+import com.nytefall.nytegallery.data.VaultStore
+import com.nytefall.nytegallery.data.captureMillis
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay

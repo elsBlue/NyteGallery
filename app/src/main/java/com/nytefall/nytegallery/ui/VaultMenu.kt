@@ -1,4 +1,4 @@
-package com.example.saogallery.ui
+package com.nytefall.nytegallery.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background

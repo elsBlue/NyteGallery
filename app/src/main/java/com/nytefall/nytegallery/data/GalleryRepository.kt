@@ -1,6 +1,6 @@
-package com.example.saogallery.data
+package com.nytefall.nytegallery.data
 
-import com.example.saogallery.R
+import com.nytefall.nytegallery.R
 
 object GalleryRepository {
     val photos: List<GalleryPhoto> = listOf(

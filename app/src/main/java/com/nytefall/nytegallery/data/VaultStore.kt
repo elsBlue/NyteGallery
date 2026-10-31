@@ -1,4 +1,4 @@
-package com.example.saogallery.data
+package com.nytefall.nytegallery.data
 
 import android.content.Context
 import android.graphics.Bitmap
