@@ -211,7 +211,7 @@ fun DeviceImportPage(
             }
         } else if (mode == "folder" && openFolder == null) {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+                columns = if (windowShape() == WindowShape.Phone) GridCells.Fixed(2) else GridCells.Adaptive(160.dp),
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 12.dp, start = 12.dp, end = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -256,7 +256,7 @@ fun DeviceImportPage(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
+                columns = vaultGridColumns(),
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 12.dp, start = 8.dp, end = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),

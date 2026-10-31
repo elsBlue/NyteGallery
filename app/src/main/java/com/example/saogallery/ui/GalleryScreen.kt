@@ -21,10 +21,12 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -62,6 +64,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -69,6 +72,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.rememberCoroutineScope
@@ -123,6 +127,38 @@ private const val CARD_LIMIT = 16
 private const val LABEL_LIMIT = 22
 private const val SCREENSHOTS_ALLOWED = true
 private val CardHeader = 34.dp
+
+private class CardFit(val width: Dp, val shiftX: Dp, val shiftY: Dp?)
+
+private fun cardFit(shape: WindowShape, maxWidth: Dp, maxHeight: Dp, compact: Boolean, insetTop: Dp, insetBottom: Dp): CardFit {
+    val byWidth = maxWidth * if (compact) 0.42f else 0.62f
+    if (shape == WindowShape.Phone) return CardFit(byWidth, 0.dp, null)
+    if (shape == WindowShape.TallWide) {
+        val band = maxHeight - if (compact) 140.dp else 400.dp
+        return CardFit(minOf(byWidth, widthForBand(band)), 0.dp, null)
+    }
+    val top = insetTop + 60.dp
+    val bottom = insetBottom + if (compact) 112.dp else 60.dp
+    val band = maxHeight - top - bottom
+    val cap = if (compact) byWidth else maxWidth * 0.22f
+    return CardFit(
+        width = minOf(cap, widthForBand(band)),
+        shiftX = if (compact) 0.dp else maxWidth * -0.14f,
+        shiftY = top + band / 2 - maxHeight / 2,
+    )
+}
+
+private fun widthForBand(band: Dp): Dp =
+    ((band / ((0.62f + 0.5f) * 1.04f) - CardHeader) / 1.32f).coerceAtLeast(56.dp)
+
+@Composable
+private fun cardFitFor(maxWidth: Dp, maxHeight: Dp, compact: Boolean): CardFit {
+    val density = LocalDensity.current
+    val insets = WindowInsets.systemBars
+    val top = with(density) { insets.getTop(density).toDp() }
+    val bottom = with(density) { insets.getBottom(density).toDp() }
+    return cardFit(windowShape(), maxWidth, maxHeight, compact, top, bottom)
+}
 
 @Composable
 fun GalleryScreen(
@@ -359,40 +395,55 @@ fun GalleryScreen(
             modifier = Modifier.fillMaxSize().alpha(0.5f),
         )
         Box(Modifier.fillMaxSize().background(wash))
-        Column(Modifier.fillMaxSize()) {
+        val shape = windowShape()
+        val stage: @Composable (Modifier) -> Unit = { boxModifier ->
+            Box(
+                boxModifier
+                    .pointerInput(state.photos.size) {
+                        val tracker = VelocityTracker()
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                tracker.resetTracking()
+                                onDragStart()
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                tracker.addPosition(change.uptimeMillis, change.position)
+                                onDrag(dragAmount)
+                            },
+                            onDragEnd = { onDragEnd(tracker.calculateVelocity().x) },
+                            onDragCancel = { onDragEnd(0f) },
+                        )
+                    },
+            ) {
+                Stage(
+                    state = state,
+                    light = light,
+                    compact = galleryOpen,
+                    showPencil = galleryOpen,
+                    showActions = !galleryOpen && !trashOpen,
+                    ink = ink,
+                    onEdit = openRename,
+                    onDelete = requestTrash,
+                    onOpen = { viewing = true },
+                )
+            }
+        }
+        if (shape == WindowShape.Landscape && galleryOpen && !trashOpen) {
+            Row(Modifier.fillMaxSize()) {
+                stage(Modifier.weight(0.5f).fillMaxHeight())
+                PhotoGrid(
+                    photos = state.photos,
+                    activeIndex = state.activeIndex,
+                    light = light,
+                    onAdd = openPicker,
+                    onPick = onShowIndex,
+                    inset = true,
+                    modifier = Modifier.weight(0.5f).fillMaxHeight(),
+                )
+            }
+        } else Column(Modifier.fillMaxSize()) {
             if (!trashOpen) {
-                Box(
-                    Modifier
-                        .weight(if (galleryOpen) 0.6f else 1f)
-                        .fillMaxWidth()
-                        .pointerInput(state.photos.size) {
-                            val tracker = VelocityTracker()
-                            detectHorizontalDragGestures(
-                                onDragStart = {
-                                    tracker.resetTracking()
-                                    onDragStart()
-                                },
-                                onHorizontalDrag = { change, dragAmount ->
-                                    tracker.addPosition(change.uptimeMillis, change.position)
-                                    onDrag(dragAmount)
-                                },
-                                onDragEnd = { onDragEnd(tracker.calculateVelocity().x) },
-                                onDragCancel = { onDragEnd(0f) },
-                            )
-                        },
-                ) {
-                    Stage(
-                        state = state,
-                        light = light,
-                        compact = galleryOpen,
-                        showPencil = galleryOpen,
-                        showActions = !galleryOpen && !trashOpen,
-                        ink = ink,
-                        onEdit = openRename,
-                        onDelete = requestTrash,
-                        onOpen = { viewing = true },
-                    )
-                }
+                stage(Modifier.weight(if (galleryOpen) 0.6f else 1f).fillMaxWidth())
             }
             if (trashOpen) {
                 TrashGrid(
@@ -713,6 +764,7 @@ private fun EmptyTrashOverlay(
         Column(
             Modifier
                 .padding(horizontal = 28.dp)
+                .wideCap()
                 .fillMaxWidth()
                 .shadow(24.dp, RoundedCornerShape(24.dp))
                 .clip(RoundedCornerShape(24.dp))
@@ -786,6 +838,7 @@ private fun TransferDialog(progress: TransferProgress) {
             Column(
                 Modifier
                     .padding(horizontal = 32.dp)
+                    .wideCap()
                     .fillMaxWidth()
                     .shadow(24.dp, RoundedCornerShape(24.dp))
                     .clip(RoundedCornerShape(24.dp))
@@ -872,7 +925,7 @@ private fun RestorePage(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
         )
         LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
+            columns = vaultGridColumns(),
             modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -972,75 +1025,110 @@ private fun Stage(
                 .windowInsetsPadding(WindowInsets.systemBars)
                 .padding(top = 18.dp),
         )
-        if (active != null) {
+        val shape = windowShape()
+        val sideInfo = shape == WindowShape.Landscape && !compact
+        if (active != null && sideInfo) {
+            Column(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .padding(end = 24.dp)
+                    .fillMaxWidth(0.34f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                ActiveLabel(active, ink, showPencil, onEdit)
+                if (showActions) {
+                    Spacer(Modifier.height(18.dp))
+                    ActionRow(Modifier, ink, onEdit, onDelete)
+                }
+            }
+        } else if (active != null) {
             Column(
                 Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = if (compact) 8.dp else 78.dp, start = 56.dp, end = 56.dp),
+                    .then(
+                        if (shape == WindowShape.Landscape) {
+                            Modifier.windowInsetsPadding(WindowInsets.systemBars).padding(bottom = 60.dp, start = 24.dp, end = 24.dp)
+                        } else {
+                            Modifier.padding(bottom = if (compact) 8.dp else 78.dp, start = 56.dp, end = 56.dp)
+                        },
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = clipName(active.name, LABEL_LIMIT),
-                        color = ink,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (showPencil) {
-                        Spacer(Modifier.width(8.dp))
-                        Box(
-                            Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(ink.copy(alpha = 0.1f))
-                                .clickable(onClick = onEdit),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            PencilIcon(ink)
-                        }
-                    }
-                }
-                val taken = formatTaken(active.takenAt)
-                if (taken.isNotEmpty()) {
-                    Text(
-                        text = taken,
-                        color = ink.copy(alpha = 0.62f),
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        modifier = Modifier.padding(top = 3.dp),
-                    )
-                }
+                ActiveLabel(active, ink, showPencil, onEdit)
             }
         }
-        if (showActions && active != null) {
+        if (showActions && active != null && !sideInfo) {
             androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
-                val cardWidth = maxWidth * 0.62f
+                val cardWidth = cardFitFor(maxWidth, maxHeight, compact = false).width
                 val cardHeight = cardWidth * 1.32f
                 val visualScale = (0.62f + 0.5f) * 1.04f
-                Row(
+                ActionRow(
                     Modifier
                         .align(Alignment.TopCenter)
                         .offset(y = maxHeight / 2 + cardHeight / 2 * visualScale - 8.dp + 28.dp)
                         .zIndex(30f),
-                    horizontalArrangement = Arrangement.spacedBy(22.dp),
-                ) {
-                    Box(
-                        Modifier
-                            .height(42.dp)
-                            .clip(RoundedCornerShape(21.dp))
-                            .background(DotA)
-                            .clickable(onClick = onDelete)
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("delete", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                    ActionChip(ink, onEdit) { PencilIcon(ink) }
-                }
+                    ink,
+                    onEdit,
+                    onDelete,
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun ActiveLabel(active: GalleryPhoto, ink: Color, showPencil: Boolean, onEdit: () -> Unit) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = clipName(active.name, LABEL_LIMIT),
+                    color = ink,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (showPencil) {
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(ink.copy(alpha = 0.1f))
+                            .clickable(onClick = onEdit),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PencilIcon(ink)
+                    }
+                }
+            }
+            val taken = formatTaken(active.takenAt)
+            if (taken.isNotEmpty()) {
+                Text(
+                    text = taken,
+                    color = ink.copy(alpha = 0.62f),
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+}
+
+@Composable
+private fun ActionRow(modifier: Modifier, ink: Color, onEdit: () -> Unit, onDelete: () -> Unit) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+        Box(
+            Modifier
+                .height(42.dp)
+                .clip(RoundedCornerShape(21.dp))
+                .background(DotA)
+                .clickable(onClick = onDelete)
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("delete", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+        ActionChip(ink, onEdit) { PencilIcon(ink) }
     }
 }
 
@@ -1054,10 +1142,21 @@ private fun BoxWithConstraintsFill(
 ) {
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
-        val cardWidth = maxWidth * if (compact) 0.42f else 0.62f
+        val phone = windowShape() == WindowShape.Phone
+        val fit = cardFitFor(maxWidth, maxHeight, compact)
+        val cardWidth = fit.width
         val cardHeight = cardWidth * 1.32f
-        val radiusPx = with(density) { (maxWidth * if (compact) 0.34f else 0.52f).toPx() }
-        val fillWidth = with(density) { (maxWidth * 0.62f * 1.17f).roundToPx() }.coerceIn(1, 2048)
+        val radiusPx = with(density) {
+            if (phone) (maxWidth * if (compact) 0.34f else 0.52f).toPx()
+            else (cardWidth * if (compact) 0.34f / 0.42f else 0.52f / 0.62f).toPx()
+        }
+        val fullWidth = cardFitFor(maxWidth, maxHeight, compact = false).width
+        val fillWidth = with(density) {
+            if (phone) (maxWidth * 0.62f * 1.17f).roundToPx()
+            else (maxOf(cardWidth, fullWidth) * 1.17f).roundToPx()
+        }.coerceIn(1, 2048)
+        val shiftX = fit.shiftX
+        val shiftY = fit.shiftY
         val fillHeight = (fillWidth * 1.32f).roundToInt()
         val count = photos.size
         if (count == 0) return@BoxWithConstraints
@@ -1094,9 +1193,13 @@ private fun BoxWithConstraintsFill(
                     .width(cardWidth)
                     .height(frame)
                     .graphicsLayer {
-                        translationX = sin(rad).toFloat() * radiusPx
-                        translationY = (1f - depth) * 28.dp.toPx() - 8.dp.toPx() - (CardHeader / 2).toPx() +
-                            if (compact) 36.dp.toPx() else 0f
+                        translationX = sin(rad).toFloat() * radiusPx + shiftX.toPx()
+                        translationY = if (shiftY == null) {
+                            (1f - depth) * 28.dp.toPx() - 8.dp.toPx() - (CardHeader / 2).toPx() +
+                                if (compact) 36.dp.toPx() else 0f
+                        } else {
+                            (1f - depth) * 28.dp.toPx() + shiftY.toPx()
+                        }
                         rotationY = (-rel * 0.72f).coerceIn(-62f, 62f)
                         rotationZ = rel * 0.045f
                         scaleX = scale * boost
@@ -1186,12 +1289,20 @@ private fun PortraitWindow(
 private fun FullView(photo: GalleryPhoto, onClose: () -> Unit) {
     var scale by remember(photo.id) { mutableFloatStateOf(1f) }
     var offset by remember(photo.id) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var box by remember { mutableStateOf(IntSize.Zero) }
     val transform = rememberTransformableState { zoom, pan, _ ->
         val next = (scale * zoom).coerceIn(1f, 6f)
         scale = next
-        offset = if (next <= 1.01f) androidx.compose.ui.geometry.Offset.Zero else offset + pan
+        offset = if (next <= 1.01f) {
+            androidx.compose.ui.geometry.Offset.Zero
+        } else {
+            val moved = offset + pan
+            val maxX = box.width * (next - 1f) / 2f
+            val maxY = box.height * (next - 1f) / 2f
+            androidx.compose.ui.geometry.Offset(moved.x.coerceIn(-maxX, maxX), moved.y.coerceIn(-maxY, maxY))
+        }
     }
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(Color.Black).onSizeChanged { box = it }) {
         PhotoImage(
             photo = photo,
             modifier = Modifier
@@ -1301,13 +1412,17 @@ private fun PhotoGrid(
     onAdd: () -> Unit,
     onPick: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    inset: Boolean = false,
 ) {
     Column(
-        modifier.background(if (light) Color(0xFFF7F4EF) else Color(0xFF0C0D11)),
+        modifier
+            .background(if (light) Color(0xFFF7F4EF) else Color(0xFF0C0D11))
+            .then(if (inset) Modifier.windowInsetsPadding(WindowInsets.systemBars) else Modifier),
     ) {
         LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
+            columns = vaultGridColumns(),
             modifier = Modifier.fillMaxSize().padding(6.dp),
+            contentPadding = if (inset) PaddingValues(top = 56.dp, bottom = 60.dp) else PaddingValues(0.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -1381,7 +1496,7 @@ private fun TrashGrid(
             )
         }
         LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
+            columns = vaultGridColumns(),
             modifier = Modifier.fillMaxSize().padding(6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1447,6 +1562,7 @@ private fun NoticeOverlay(
         Column(
             Modifier
                 .padding(horizontal = 28.dp)
+                .wideCap()
                 .fillMaxWidth()
                 .shadow(24.dp, RoundedCornerShape(24.dp))
                 .clip(RoundedCornerShape(24.dp))
@@ -1579,6 +1695,7 @@ private fun RenameOverlay(
         Column(
             Modifier
                 .padding(horizontal = 28.dp)
+                .wideCap()
                 .fillMaxWidth()
                 .shadow(24.dp, RoundedCornerShape(24.dp))
                 .clip(RoundedCornerShape(24.dp))
