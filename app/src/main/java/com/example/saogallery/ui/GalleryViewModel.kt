@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.annotation.RequiresApi
 import androidx.lifecycle.AndroidViewModel
@@ -31,8 +32,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.RandomAccessFile
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -270,6 +269,22 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
         return true
     }
 
+    /** Removes a half-written or empty backup so it isn't mistaken for a good one later. */
+    private fun dropDocument(uri: Uri) {
+        val resolver = getApplication<Application>().contentResolver
+        val deleted = try {
+            DocumentsContract.deleteDocument(resolver, uri)
+        } catch (_: Exception) {
+            false
+        }
+        if (!deleted) {
+            try {
+                resolver.openOutputStream(uri, "wt")?.close()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     private fun plainBytes(photo: GalleryPhoto): ByteArray? {
         if (photo.vaultFile != null) return vault.read(photo)
         return bundledBytes(photo)
@@ -403,11 +418,15 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) {
                     val app = getApplication<Application>()
                     val uri = Uri.parse(uriString)
-                    val tmp = File.createTempFile("nyte-bak", ".part", app.cacheDir)
+                    var written = 0
+                    var finished = false
                     try {
-                        var written = 0
-                        RandomAccessFile(tmp, "rw").use { file ->
-                            VaultBackup.begin(password, file).use { writer ->
+                        val out = (try { app.contentResolver.openOutputStream(uri, "wt") } catch (_: Exception) { null })
+                            ?: app.contentResolver.openOutputStream(uri)
+                            ?: return@withContext -1
+                        var sealed = false
+                        out.use { stream ->
+                            VaultBackup.begin(password, stream, photos.size).use { writer ->
                                 photos.forEachIndexed { index, photo ->
                                     val bytes = plainBytes(photo)
                                     if (bytes != null) {
@@ -417,16 +436,18 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                                     }
                                     markTransfer(index + 1, photos.size)
                                 }
+                                if (written > 0) {
+                                    writer.finish()
+                                    sealed = true
+                                }
                             }
                         }
-                        if (written == 0) return@withContext 0
-                        val out = app.contentResolver.openOutputStream(uri) ?: return@withContext -1
-                        out.use { stream -> tmp.inputStream().use { it.copyTo(stream) } }
-                        written
+                        finished = sealed
+                        if (finished) written else 0
                     } catch (_: Exception) {
                         -1
                     } finally {
-                        tmp.delete()
+                        if (!finished) dropDocument(uri)
                     }
                 }
             } finally {
