@@ -38,6 +38,20 @@ class LockStore(context: Context) {
             .apply()
     }
 
+    /** Changes only the recovery email. Any code sent to the old address stops working. */
+    fun updateEmail(email: String) {
+        prefs.edit()
+            .putString(EMAIL, email.trim())
+            .remove(CODE)
+            .remove(CODE_AT)
+            .apply()
+    }
+
+    /** Turns the app lock off: removes every saved unlock way, the email and any pending code. */
+    fun clear() {
+        prefs.edit().clear().apply()
+    }
+
     fun matches(method: String, value: String): Boolean {
         val salt = prefs.getString(SALT, null) ?: return false
         val saved = prefs.getString(method, null) ?: return false

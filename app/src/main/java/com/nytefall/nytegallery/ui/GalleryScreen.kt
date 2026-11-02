@@ -197,6 +197,8 @@ fun GalleryScreen(
     var locked by remember { mutableStateOf(lockStore.configured()) }
     var confirmingLock by remember { mutableStateOf(false) }
     var settingLock by remember { mutableStateOf(false) }
+    // "lock" or "email" while changing the lock or the recovery email from Settings.
+    var changingLock by remember { mutableStateOf<String?>(null) }
     var galleryOpen by remember { mutableStateOf(false) }
     var trashOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
@@ -382,6 +384,7 @@ fun GalleryScreen(
             importBackup = false
             settingsOpen = false
             aboutOpen = false
+            changingLock = null
         }
     }
 
@@ -409,6 +412,7 @@ fun GalleryScreen(
             settingLock -> settingLock = false
             confirmingLock -> confirmingLock = false
             locked -> Unit
+            changingLock != null -> changingLock = null
             backupOpen -> if (!backupBusy) backupOpen = false
             importBackup -> if (!backupBusy) importBackup = false
             aboutOpen -> aboutOpen = false
@@ -771,7 +775,7 @@ fun GalleryScreen(
             )
         }
         // Hidden (not closed) while Backup or Restore backup is on top, so Back returns here.
-        if (settingsOpen && !locked && !backupOpen && !importBackup) {
+        if (settingsOpen && !locked && !backupOpen && !importBackup && changingLock == null) {
             SettingsPage(
                 light = light,
                 lockOn = lockStore.configured(),
@@ -792,6 +796,8 @@ fun GalleryScreen(
                     settingsOpen = false
                     confirmingLock = true
                 },
+                onChangeLock = { changingLock = "lock" },
+                onChangeEmail = { changingLock = "email" },
                 onBackup = {
                     backupError = null
                     backupGuide = !backupPrefs.guideSeen()
@@ -806,6 +812,31 @@ fun GalleryScreen(
                     backupError = null
                     restoreNote = null
                     importBackup = true
+                },
+            )
+        }
+        if (changingLock == "lock" && !locked) {
+            LockChangePage(
+                light = light,
+                store = lockStore,
+                onClose = { changingLock = null },
+                onChanged = {
+                    changingLock = null
+                    Toast.makeText(context, "Lock updated", Toast.LENGTH_SHORT).show()
+                },
+                onTurnedOff = {
+                    changingLock = null
+                    Toast.makeText(context, "App lock is off", Toast.LENGTH_SHORT).show()
+                },
+            )
+        } else if (changingLock == "email" && !locked) {
+            RecoveryEmailPage(
+                light = light,
+                store = lockStore,
+                onClose = { changingLock = null },
+                onChanged = {
+                    changingLock = null
+                    Toast.makeText(context, "Recovery email updated", Toast.LENGTH_SHORT).show()
                 },
             )
         }

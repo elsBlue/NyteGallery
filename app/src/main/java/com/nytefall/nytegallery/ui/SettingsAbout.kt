@@ -71,6 +71,8 @@ fun SettingsPage(
     onClose: () -> Unit,
     onRecycleBin: () -> Unit,
     onAppLock: () -> Unit,
+    onChangeLock: () -> Unit,
+    onChangeEmail: () -> Unit,
     onBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onCheckBackup: () -> Unit,
@@ -123,19 +125,18 @@ fun SettingsPage(
 
                 SectionLabel("Security", ink)
                 SettingsCard(card) {
-                    SettingsRow(
-                        "App lock",
-                        if (lockOn) "On · Tap to lock now" else "Off · Tap to set up a lock",
-                        ink,
-                        onAppLock,
-                    )
+                    if (lockOn) {
+                        SettingsRow("Change lock", "On · Change how Nyte Gallery unlocks", ink, onChangeLock)
+                    } else {
+                        SettingsRow("App lock", "Off · Tap to set up a lock", ink, onAppLock)
+                    }
                     RowDivider(ink)
                     if (lockOn) {
                         SettingsRow(
                             "Recovery email",
                             recoveryEmail.ifBlank { "Not set" },
                             ink,
-                            onClick = null,
+                            onClick = onChangeEmail,
                         )
                     } else {
                         SettingsRow("Recovery email", "Added when you set up the lock", ink, onAppLock)
