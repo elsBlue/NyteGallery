@@ -19,8 +19,10 @@ Markers used below:
 Nyte Gallery is a private photo vault for Android (minSdk 26, targetSdk 35). The user moves photos from the
 phone gallery into the app, where they are stored encrypted in the app's private storage. Photos can be renamed,
 moved to Trash, put back into the public gallery ("Restore"), and saved to or restored from a password-encrypted
-backup file. An optional app lock (password, PIN, pattern, fingerprint) protects the app, with an email
+backup file. An optional app lock (password, PIN, pattern, fingerprint) protects the app, with an offline
 recovery code. **[CODE]**
+
+Since 2026-11-02 the app has **no internet access at all** (no `INTERNET` permission). **[CODE]**
 
 There are no user accounts, no sign-in, and no Nyte server. **[CODE]**
 
@@ -35,28 +37,28 @@ There are no user accounts, no sign-in, and no Nyte server. **[CODE]**
 | App lock secrets (password, PIN, pattern) | SharedPreferences `nyte_lock`, stored as PBKDF2-HMAC-SHA256 hashes with a random salt per secret, never plain text **[CODE]** | No |
 | Wrong-try counter and cooldown end time | SharedPreferences `nyte_lock` **[CODE]** | No |
 | Fingerprint | Handled by Android BiometricPrompt. The app never sees fingerprint data, only "success". **[CODE]** | No |
-| Recovery email address | SharedPreferences `nyte_lock`, plain text **[CODE]** | **Yes**, sent to FormSubmit when a recovery code is requested (see 2.1) |
-| One-time recovery code | Hash plus time in `nyte_lock`, valid 10 minutes **[CODE]** | **Yes**, the code itself is sent in the email body via FormSubmit |
+| Recovery code (16 characters, shown once) | SharedPreferences `nyte_lock`, PBKDF2 hash only **[CODE]** | No |
 | Backup flags (guide seen, last backup time and photo count) | SharedPreferences `nyte_backup` **[CODE]** | No |
 | Trash-explained / seeded flags | SharedPreferences `nyte_gallery` **[CODE]** | No |
 | Built-in sample photos | Bundled app resources (`R.drawable.*`) **[CODE]** | No |
 
-### 2.1 The only network use: recovery email via FormSubmit
+### 2.1 No network use (email recovery removed 2026-11-02)
 
-- `data/LockStore.kt` `sendUnlockCode()` POSTs to `https://formsubmit.co/ajax/<user email>` with the code,
-  subject and the name "Nyte Gallery". **[CODE]**
-- This happens only when a locked user taps "Use email code" or asks for a new code. **[CODE]**
-- FormSubmit is a third-party service. It receives the user's email address and the code, and the first time
-  it asks the recipient to confirm the address. **[CODE: in-app text says so]**
-- No photo, photo name or other vault data is ever sent over the network. **[CODE]**
-- **[ASSUMPTION]** FormSubmit's own retention and privacy terms have not been reviewed. Decide before release:
-  keep FormSubmit (and disclose it), move to a service Nytefall controls, or drop email recovery.
+- Email recovery through FormSubmit was removed. The app has no `INTERNET` permission and no network code. **[CODE]**
+- Recovery is offline: at lock setup the app shows a random 16-character code (`XXXX-XXXX-XXXX-XXXX`, alphabet
+  without 0/O/1/I/L, about 79 bits) once, with a warning and a "I have written down my recovery code" checkbox.
+  Only a PBKDF2 hash is stored. Copy marks the clip as sensitive (Android 13+) and clears it after about 60 s
+  (best effort). **[CODE]**
+- "Forgot? Use recovery code" on the unlock screen uses the same wrong-try cooldown. On success the user sets a new
+  lock and gets a new code; the old code stays valid until the new one is created, so a crash cannot lock them out.
+  Settings > Security > Recovery code creates a new code after the current lock is checked. **[CODE]**
+- Users who set up the lock with email: on the next unlock they are shown a new recovery code, and the stored email
+  and any pending email code are deleted. **[CODE]**
 
 ## 3. Permissions and why (from `AndroidManifest.xml`)
 
 | Permission | Why | Notes |
 |---|---|---|
-| `INTERNET` | Only for the recovery-code email (FormSubmit) **[CODE]** | No analytics, ads or crash reporting use it |
 | `READ_MEDIA_IMAGES` (API 33+) | List gallery photos so the user can pick which to move into the vault **[CODE]** | Asked only when the user opens "move from gallery" |
 | `READ_MEDIA_VISUAL_USER_SELECTED` (API 34+) | Android "selected photos only" access **[CODE]** | |
 | `READ_EXTERNAL_STORAGE` (max API 32) | Same as above on older Android **[CODE]** | |
@@ -65,7 +67,7 @@ There are no user accounts, no sign-in, and no Nyte server. **[CODE]**
 | `POST_NOTIFICATIONS` (API 33+) | Show that progress notification **[CODE]** | Asked the first time a transfer starts |
 | `USE_BIOMETRIC` | Not declared in the app manifest. It comes from the `androidx.biometric` library manifest merge **[ASSUMPTION: confirm in merged manifest]** | Fingerprint unlock |
 
-Not requested: camera, location, contacts, microphone, phone, accounts, `MANAGE_EXTERNAL_STORAGE`. **[CODE]**
+Not requested: **internet** (removed 2026-11-02; re-check the merged manifest of each release), camera, location, contacts, microphone, phone, accounts, `MANAGE_EXTERNAL_STORAGE`. **[CODE]**
 
 Backup and restore files are picked with the system file picker (Storage Access Framework), so no extra storage
 permission is needed for them. **[CODE]**
@@ -90,8 +92,8 @@ permission is needed for them. **[CODE]**
   - The iteration count is stored in each hash, so it can be raised later the same way.
   - A 4 to 6 digit PIN is still a small space for an offline attack on a rooted phone; the real protection is
     app-private storage plus the wrong-try limit. Do not describe this as "military grade" in public text.
-- **Wrong-try limit** (since 2026-11-02): wrong passwords, PINs, patterns and email codes are counted together on
-  the unlock screen and on the "confirm it's you" step of Change lock, Recovery email and Turn off lock.
+- **Wrong-try limit** (since 2026-11-02): wrong passwords, PINs, patterns and recovery codes are counted together on
+  the unlock screen and on the "confirm it's you" step of Change lock, Recovery code and Turn off lock.
   4 free tries, then a wait of 30 s (5th wrong), 1 min (6th), 5 min (7th), 15 min (8th), 30 min (9th), and 1 hour
   for each wrong try after that. The counter survives closing the app and is cleared by any success (including
   fingerprint). Nothing is ever wiped. The try is counted before the value is checked, so killing the app during
@@ -129,7 +131,7 @@ Biometric only) and in the code: **[CODE]**
 - No user accounts or sign-in.
 - No Nytefall server or backend.
 - No analytics, crash reporting, advertising, attribution or tracking SDKs (no Firebase, Google Play Services ads, etc.).
-- No selling or sharing of data, except the recovery email sent through FormSubmit (section 2.1).
+- No internet access, no selling or sharing of data.
 - No location, contacts, camera or microphone access.
 - No in-app purchases. **[CODE: none in this build]**
 
@@ -153,25 +155,20 @@ Biometric only) and in the code: **[CODE]**
 
 - **[ASSUMPTION]** Target audience: adults / general (13+ or 18+). Not designed for children; do not opt into the
   Families program. Choose the age group in Play Console "Target audience and content".
-- The app collects no personal data on a server, but the recovery email goes to FormSubmit. If children were a target,
-  that would need review.
+- The app collects no personal data and has no internet access.
 
 ## 9. Draft Play Console Data safety answers
 
 **[ASSUMPTION]** Draft only. Re-check each answer against the final release build and Google's current form.
 
-- Does the app collect or share any required user data types? **Yes**, only because of the recovery email:
-  - Personal info > **Email address**: *Collected* (sent off device to FormSubmit to deliver the code).
-    Purpose: **Account management / app functionality** (security recovery). Optional: **Yes** (only if the user
-    sets a lock and uses email recovery). **[ASSUMPTION: whether FormSubmit counts as a service provider
-    (then "collected", not "shared")]**
-  - If email recovery is removed before release, answer **No data collected or shared**.
+- Does the app collect or share any required user data types? **No.** Answer **"No data collected"**: the app has
+  no internet access, so no user data leaves the device through the app. **[CODE]**
 - Photos and videos: **Not collected**. Google defines "collected" as sent off the device. Photos stay on the phone,
   encrypted. Backups go only where the user saves them, through the system picker. **[ASSUMPTION: confirm this
   reading of Google's definition at the time of filing]**
-- Is all user data encrypted in transit? **Yes** (HTTPS to FormSubmit).
+- Encryption in transit: not applicable (nothing is transmitted).
 - Can users request deletion? **Yes / not applicable**: all data is on the device, uninstall deletes it.
-  The email sent to FormSubmit is outside Nytefall's control. **[ASSUMPTION]**
+  **[ASSUMPTION]**
 - Independent security review: **No**.
 
 ## 10. Draft Privacy Policy (to adapt)
@@ -190,9 +187,8 @@ Biometric only) and in the code: **[CODE]**
 > **Permissions.** We ask for photo access only so you can choose photos to move into the vault, and notification
 > access to show progress for long tasks. Fingerprint unlock is handled by Android; we never receive fingerprint data.
 >
-> **Recovery email.** If you turn on the app lock, you enter an email address. It is stored on your device. When you
-> ask for a recovery code, the app sends your email address and a one-time code to FormSubmit (formsubmit.co), a
-> third-party email service, so the code can be emailed to you. Nothing else is sent.
+> **Recovery code.** The app has no internet access. If you turn on the app lock, you get a recovery code that is shown
+> once and stored on your device only as a hash. We cannot recover or reset it.
 >
 > **Backups.** Backups are created only when you choose, encrypted with a password you set, and saved where you pick.
 > We never receive the file or the password, and we cannot recover a forgotten password.
@@ -209,13 +205,13 @@ Biometric only) and in the code: **[CODE]**
 ## 11. Draft Terms of Service points
 
 - The app is provided **"as is"** and "as available", without warranties of any kind.
-- The user is responsible for making and keeping backups, and for remembering the backup password and the app lock
-  methods. Nytefall Interactive cannot recover passwords, keys or photos.
+- The user is responsible for making and keeping backups, and for remembering the backup password, the app lock
+  methods and the recovery code. Nytefall Interactive cannot recover passwords, keys or photos.
 - Nytefall Interactive is **not liable for lost, deleted or inaccessible data**, including loss caused by uninstalling,
   clearing app data, device loss or reset, a forgotten password, a damaged backup file, or third-party storage.
 - Users must only store content they have the right to store, and must follow the law.
 - The app lock is a privacy feature, not a guarantee against every attack (for example a rooted or compromised device).
-- Third-party services the user chooses (Google Drive, FormSubmit email delivery) are covered by their own terms.
+- Third-party services the user chooses (for example Google Drive for backup files) are covered by their own terms.
 - Terms may change; continued use means acceptance. Governing law: **[ASSUMPTION: choose, e.g. Indonesia]**.
 - Contact: nytefall.interactive@gmail.com.
 
@@ -229,8 +225,8 @@ Biometric only) and in the code: **[CODE]**
 4. **Screenshots locked**: DONE 2026-11-02. `SCREENSHOTS_ALLOWED = false` (`ui/GalleryScreen.kt`), FLAG_SECURE is set
    in `MainActivity.onCreate` and kept on for every screen including the lock screen, so screenshots, screen
    recording and the Recent apps preview are blocked.
-5. **Decide on FormSubmit** email recovery (keep and disclose, replace, or remove). This changes the Data safety
-   answers and the policy text.
+5. **FormSubmit email recovery**: DONE 2026-11-02, removed and replaced with an offline recovery code; `INTERNET`
+   permission removed. Data safety: "No data collected".
 6. **Host the Privacy Policy** at a public URL, for example GitHub Pages
    (`https://<user>.github.io/<repo>/privacy`) or a page on a Nytefall site. Play needs the URL in the store listing
    and, ideally, a link inside the app.

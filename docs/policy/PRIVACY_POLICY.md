@@ -9,8 +9,9 @@ This policy explains what happens to your information when you use the app.
 
 - Your photos stay on your phone, encrypted. We never receive them.
 - There are no accounts, no ads, no analytics and no tracking.
-- The only information that leaves your phone through the app is your recovery email address and a one-time
-  code, and only when you ask for a recovery code (see "Recovery email" below).
+- The app has no internet access. Nothing you store in it leaves your phone through the app. We collect and share
+  no data.
+- Lock recovery is offline, with a recovery code only you have (see "Recovery code" below).
 
 ## Photos you move into the vault
 
@@ -35,24 +36,25 @@ reporting, advertising or tracking tools. We do not sell your data.
 - **Photos / storage:** only so you can choose photos to move into the vault, and to put photos back into your
   gallery when you restore them.
 - **Notifications:** to show progress while a long task (moving photos, restoring, backing up) runs.
-- **Internet:** only for the recovery email described below.
 - **Fingerprint:** fingerprint unlock is handled by Android. The app only learns whether the check succeeded; it
   never receives your fingerprint data.
 
-The app does not use your camera, microphone, location or contacts.
+The app does not request internet access, and does not use your camera, microphone, location or contacts.
 
 ## App lock
 
 If you turn on the app lock, your password, PIN or pattern is stored on your device only as a salted hash,
-never in plain text. It is not sent anywhere.
+never in plain text. It is not sent anywhere. After several wrong tries, the app makes you wait before trying again.
 
-## Recovery email
+## Recovery code
 
-When you set up the app lock, you enter an email address. It is stored on your device. If you later ask for a
-recovery code, the app sends your email address and a one-time code to **FormSubmit** (formsubmit.co), a
-third-party email delivery service, so the code can be emailed to you. The first time, FormSubmit may ask you to
-confirm your address. Nothing else is sent: no photos, photo names or other vault data. FormSubmit handles this
-information under its own terms and privacy policy. The connection uses HTTPS.
+When you set up the app lock, the app shows you a recovery code once. Only a salted hash of it is stored on your
+device; the code itself is never stored in plain text and never sent anywhere. If you forget how to unlock, you can
+enter the recovery code to set a new lock, and you then get a new code. **We cannot recover or reset your recovery
+code.** If you lose it and forget your lock, the photos in the vault cannot be opened.
+
+Earlier test versions could email a recovery code through a third-party service. That feature has been removed,
+and any recovery email stored by an earlier version is deleted from your device when you create a recovery code.
 
 ## Backups
 

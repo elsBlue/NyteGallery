@@ -27,8 +27,8 @@ rooted, modified or compromised device.
 
 ## 4. Third-party services
 
-Services you choose to use with the app, such as a cloud drive for backup files, and the FormSubmit email service
-used to deliver recovery codes, are covered by their own terms.
+Services you choose to use with the app, such as a cloud drive for backup files, are covered by their own terms.
+The app itself does not connect to the internet.
 
 ## 5. No warranty
 

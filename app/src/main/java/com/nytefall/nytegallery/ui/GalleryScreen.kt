@@ -94,7 +94,6 @@ import com.nytefall.nytegallery.data.LockStore
 import com.nytefall.nytegallery.data.VAULT_THUMB_EDGE
 import com.nytefall.nytegallery.data.VaultStore
 import com.nytefall.nytegallery.data.formatTaken
-import com.nytefall.nytegallery.data.sendUnlockCode
 import com.nytefall.nytegallery.data.yearOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -199,8 +198,25 @@ fun GalleryScreen(
     var locked by remember { mutableStateOf(lockStore.configured()) }
     var confirmingLock by remember { mutableStateOf(false) }
     var settingLock by remember { mutableStateOf(false) }
-    // "lock" or "email" while changing the lock or the recovery email from Settings.
+    // "lock" or "code" while changing the lock or creating a new recovery code from Settings.
     var changingLock by remember { mutableStateOf<String?>(null) }
+    // A new recovery code is being created (null code) or shown once.
+    var makingRecovery by remember { mutableStateOf(false) }
+    var shownRecoveryCode by remember { mutableStateOf<String?>(null) }
+    var recoveryNote by remember { mutableStateOf<String?>(null) }
+    var lockAfterRecovery by remember { mutableStateOf(false) }
+    // Unlocked with the recovery code: set a new lock next.
+    var resettingLock by remember { mutableStateOf(false) }
+    fun showNewRecoveryCode(note: String?, lockAfter: Boolean) {
+        if (makingRecovery) return
+        makingRecovery = true
+        shownRecoveryCode = null
+        recoveryNote = note
+        lockAfterRecovery = lockAfter
+        scope.launch {
+            shownRecoveryCode = withContext(Dispatchers.Default) { lockStore.newRecoveryCode() }
+        }
+    }
     var galleryOpen by remember { mutableStateOf(false) }
     var trashOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
@@ -380,6 +396,17 @@ fun GalleryScreen(
     }
 
     LaunchedEffect(locked) {
+        // Lock set up before recovery codes (email), or a code that was never confirmed: make one now.
+        if (!locked && !resettingLock && !makingRecovery && lockStore.needsRecoveryCode()) {
+            showNewRecoveryCode(
+                if (lockStore.hadEmailRecovery()) {
+                    "Nyte Gallery no longer uses email to recover your lock. It now uses a recovery code that never leaves this phone. Your old recovery email has been removed."
+                } else {
+                    "Your recovery code was not confirmed, so here is a new one. The old one no longer works."
+                },
+                false,
+            )
+        }
         if (locked) {
             menuOpen = false
             backupOpen = false
@@ -411,6 +438,8 @@ fun GalleryScreen(
     BackHandler(enabled = true) {
         when {
             transfer != null -> Unit
+            makingRecovery -> Unit
+            resettingLock -> Unit
             settingLock -> settingLock = false
             confirmingLock -> confirmingLock = false
             locked -> Unit
@@ -729,7 +758,7 @@ fun GalleryScreen(
                 body = if (lockStore.configured()) {
                     "Lock Nyte Gallery now? Opening it again needs one of the ways you set."
                 } else {
-                    "Lock Nyte Gallery? Next you will set at least two ways to unlock, and an email for a recovery code."
+                    "Lock Nyte Gallery? Next you will set at least two ways to unlock, and get a recovery code."
                 },
                 confirm = if (lockStore.configured()) "Lock" else "Continue",
                 onDismiss = { confirmingLock = false },
@@ -743,11 +772,28 @@ fun GalleryScreen(
             LockSetupPage(
                 light = light,
                 onClose = { settingLock = false },
-                onSave = { email, password, pin, pattern, finger ->
-                    withContext(Dispatchers.Default) { lockStore.save(email, password, pin, pattern, finger) }
+                onSave = { password, pin, pattern, finger ->
+                    withContext(Dispatchers.Default) { lockStore.save(password, pin, pattern, finger) }
                     settingLock = false
-                    locked = true
+                    showNewRecoveryCode(null, true)
                 },
+            )
+        }
+        if (resettingLock && !locked) {
+            LockSetupPage(
+                light = light,
+                onClose = {
+                    resettingLock = false
+                    showNewRecoveryCode(null, false)
+                },
+                onSave = { password, pin, pattern, finger ->
+                    withContext(Dispatchers.Default) { lockStore.save(password, pin, pattern, finger) }
+                    resettingLock = false
+                    showNewRecoveryCode(null, false)
+                },
+                title = "NEW LOCK",
+                intro = "You used your recovery code. Choose at least two new ways to get back in: password, PIN, pattern, or fingerprint. Next you get a new recovery code, and the old one stops working.",
+                saveLabel = "Save new lock",
             )
         }
         if (menuOpen && !locked) {
@@ -781,7 +827,6 @@ fun GalleryScreen(
             SettingsPage(
                 light = light,
                 lockOn = lockStore.configured(),
-                recoveryEmail = lockStore.email(),
                 lastBackupAt = backupPrefs.lastBackupAt(),
                 lastBackupPhotos = backupPrefs.lastBackupPhotos(),
                 onClose = { settingsOpen = false },
@@ -799,7 +844,7 @@ fun GalleryScreen(
                     confirmingLock = true
                 },
                 onChangeLock = { changingLock = "lock" },
-                onChangeEmail = { changingLock = "email" },
+                onRecoveryCode = { changingLock = "code" },
                 onBackup = {
                     backupError = null
                     backupGuide = !backupPrefs.guideSeen()
@@ -831,14 +876,14 @@ fun GalleryScreen(
                     Toast.makeText(context, "App lock is off", Toast.LENGTH_SHORT).show()
                 },
             )
-        } else if (changingLock == "email" && !locked) {
-            RecoveryEmailPage(
+        } else if (changingLock == "code" && !locked) {
+            RecoveryCodeSettingsPage(
                 light = light,
                 store = lockStore,
                 onClose = { changingLock = null },
-                onChanged = {
+                onCreate = {
                     changingLock = null
-                    Toast.makeText(context, "Recovery email updated", Toast.LENGTH_SHORT).show()
+                    showNewRecoveryCode(null, false)
                 },
             )
         }
@@ -923,16 +968,23 @@ fun GalleryScreen(
                 light = light,
                 store = lockStore,
                 onUnlocked = { locked = false },
-                onSendCode = { done ->
-                    scope.launch {
-                        val code = lockStore.issueCode()
-                        val sent = withContext(Dispatchers.IO) {
-                            sendUnlockCode(lockStore.email(), code)
-                        }
-                        done(sent)
-                    }
+                onRecovered = {
+                    resettingLock = true
+                    locked = false
                 },
             )
+        }
+        if (makingRecovery && !locked) {
+            RecoveryCodePage(light = light, code = shownRecoveryCode, note = recoveryNote) {
+                lockStore.markRecoverySaved()
+                makingRecovery = false
+                shownRecoveryCode = null
+                recoveryNote = null
+                if (lockAfterRecovery) {
+                    lockAfterRecovery = false
+                    locked = true
+                }
+            }
         }
     }
 }

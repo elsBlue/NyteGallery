@@ -164,11 +164,10 @@ fun LockConfirm(light: Boolean, body: String, confirm: String, onDismiss: () -> 
 fun LockSetupPage(
     light: Boolean,
     onClose: () -> Unit,
-    onSave: suspend (email: String, password: String?, pin: String?, pattern: String?, finger: Boolean) -> Unit,
+    onSave: suspend (password: String?, pin: String?, pattern: String?, finger: Boolean) -> Unit,
     title: String = "LOCK",
-    intro: String = "Set how Nyte Gallery locks. Choose at least two ways to get back in: password, PIN, pattern, or fingerprint. Add an email so a forgotten method can be recovered with a code.",
+    intro: String = "Set how Nyte Gallery locks. Choose at least two ways to get back in: password, PIN, pattern, or fingerprint. Next you get a recovery code for the day you forget them.",
     saveLabel: String = "Lock app",
-    fixedEmail: String? = null,
     onTurnOff: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -177,7 +176,6 @@ fun LockSetupPage(
     val panel = if (light) Color(0xFFF7F4EF) else Color(0xFF12141A)
     val field = if (light) Color.White else Color(0xFF1C1E26)
     val fingerOk = remember { fingerprintAvailable(context) }
-    var email by remember { mutableStateOf(fixedEmail ?: "") }
     var password by remember { mutableStateOf<String?>(null) }
     var pin by remember { mutableStateOf<String?>(null) }
     var pattern by remember { mutableStateOf<String?>(null) }
@@ -187,7 +185,6 @@ fun LockSetupPage(
     var saving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val readyCount = listOf(password, pin, pattern).count { it != null } + if (finger) 1 else 0
-    val emailOk = email.trim().matches(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"))
     Column(
         Modifier
             .fillMaxSize()
@@ -207,11 +204,6 @@ fun LockSetupPage(
             fontSize = 15.sp,
             lineHeight = 21.sp,
         )
-        if (fixedEmail == null) {
-            Spacer(Modifier.height(16.dp))
-            Text("Recovery email", color = ink.copy(alpha = 0.55f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            LockField(email, field, ink, KeyboardType.Email, false, "name@email.com") { email = it }
-        }
         Spacer(Modifier.height(16.dp))
         MethodRow("Password", password != null, ink, field) { open = if (open == LockStore.PASSWORD) null else LockStore.PASSWORD }
         if (open == LockStore.PASSWORD) SecretPair(ink, field, KeyboardType.Password, "New password", "At least 6 characters", "Confirm password", "Type it again") { first, second ->
@@ -259,19 +251,19 @@ fun LockSetupPage(
         }
         Text("$readyCount of 2 ways set", color = ink.copy(alpha = 0.55f), fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
         Spacer(Modifier.height(16.dp))
-        val canSave = emailOk && readyCount >= 2
+        val canSave = readyCount >= 2
         LockButton(if (saving) "Saving..." else saveLabel, if (canSave) LockPink else ink.copy(alpha = 0.15f), if (canSave) Color.White else ink.copy(alpha = 0.4f), Modifier.fillMaxWidth()) {
             if (saving) return@LockButton
             if (canSave) {
                 saving = true
                 scope.launch {
                     try {
-                        onSave(email.trim(), password, pin, pattern, finger)
+                        onSave(password, pin, pattern, finger)
                     } finally {
                         saving = false
                     }
                 }
-            } else error = if (!emailOk) "Enter a valid email" else "Set at least two unlock ways"
+            } else error = "Set at least two unlock ways"
         }
         if (onTurnOff != null) {
             Text(
@@ -293,7 +285,7 @@ fun LockGate(
     light: Boolean,
     store: LockStore,
     onUnlocked: () -> Unit,
-    onSendCode: (onResult: (Boolean) -> Unit) -> Unit,
+    onRecovered: () -> Unit,
 ) {
     val context = LocalContext.current
     val activity = LocalHostActivity.current ?: findActivity(context)
@@ -304,8 +296,8 @@ fun LockGate(
     var method by remember { mutableStateOf(methods.firstOrNull { it != LockStore.FINGER } ?: methods.first()) }
     var value by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
-    var emailMode by remember { mutableStateOf(false) }
-    var sending by remember { mutableStateOf(false) }
+    var emailMode by remember { mutableStateOf(false) } // true: entering the recovery code
+    val canRecover = remember { store.hasRecoveryCode() }
     val tries = rememberLockTries(store)
     BoxWithConstraints(
         Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.systemBars),
@@ -329,7 +321,7 @@ fun LockGate(
         Text("Nyte Gallery", color = ink, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(18.dp))
         Text(
-            if (emailMode) "Enter the code sent to ${store.email()}" else "This gallery is locked. Use one of the ways you set.",
+            if (emailMode) "Enter your recovery code. You will then set a new lock and get a new code." else "This gallery is locked. Use one of the ways you set.",
             color = ink.copy(alpha = 0.75f),
             fontSize = 15.sp,
             lineHeight = 21.sp,
@@ -357,30 +349,19 @@ fun LockGate(
         }
         when {
             emailMode -> {
-                LockField(value, field, ink, KeyboardType.Number, false, "6-digit code") { if (it.length <= 6) value = it.filter { ch -> ch.isDigit() } }
+                LockField(value, field, ink, KeyboardType.Ascii, false, "XXXX-XXXX-XXXX-XXXX") { if (it.length <= 24) value = it }
                 Spacer(Modifier.height(14.dp))
                 LockButton(if (tries.checking) "Checking..." else "Unlock", LockPink, Color.White, Modifier.fillMaxWidth()) {
                     val typed = value
-                    tries.attempt({ store.checkCode(typed) }) { result ->
+                    tries.attempt({ store.checkRecovery(typed) }) { result ->
                         when (result) {
-                            LockCheck.Ok -> onUnlocked()
-                            is LockCheck.Wrong -> error = if (result.waitMs > 0L) "" else "That code is wrong or expired"
+                            LockCheck.Ok -> onRecovered()
+                            is LockCheck.Wrong -> error = if (result.waitMs > 0L) "" else "That recovery code is not right"
                             is LockCheck.Wait -> error = ""
                         }
                     }
                 }
-                Text(
-                    if (sending) "Sending..." else "Send a new code",
-                    color = ink.copy(alpha = 0.7f),
-                    modifier = Modifier.padding(top = 14.dp).clickable(enabled = !sending) {
-                        sending = true
-                        onSendCode { ok ->
-                            sending = false
-                            error = if (ok) "Code sent. The first time, confirm the email from Nyte Gallery, then send again." else "Couldn't send the code"
-                        }
-                    },
-                )
-                Text("Use another way", color = ink, modifier = Modifier.padding(top = 10.dp).clickable { emailMode = false; error = "" })
+                Text("Use another way", color = ink, modifier = Modifier.padding(top = 14.dp).clickable { emailMode = false; value = ""; error = "" })
             }
             method == LockStore.FINGER -> {
                 LockButton("Use fingerprint", LockPink, Color.White, Modifier.fillMaxWidth()) {
@@ -421,21 +402,16 @@ fun LockGate(
         }
         val shown = if (tries.waitMs > 0L) waitMessage(tries.waitMs) else error
         if (shown.isNotEmpty()) Text(shown, color = LockPink, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
-        if (!emailMode) {
+        if (!emailMode && canRecover) {
             Spacer(Modifier.height(18.dp))
             Text(
-                "Use email code",
+                "Forgot? Use recovery code",
                 color = ink,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clickable {
                     emailMode = true
                     value = ""
                     error = ""
-                    sending = true
-                    onSendCode { ok ->
-                        sending = false
-                        error = if (ok) "Code sent to ${store.email()}" else "Couldn't send the code. Try another way."
-                    }
                 },
             )
         }
@@ -696,7 +672,7 @@ fun LockGlyph() {
 /**
  * Change the lock from Settings. The current lock is checked first with one of the saved ways
  * (password, PIN, pattern or fingerprint), then the same setup rules apply to the new lock.
- * The recovery email is kept. Saving uses LockStore.save, so the stored format does not change.
+ * The recovery code is kept. Saving uses LockStore.save, so the stored format does not change.
  */
 @Composable
 fun LockChangePage(
@@ -726,15 +702,13 @@ fun LockChangePage(
             LockSetupPage(
                 light = light,
                 onClose = onClose,
-                onSave = { _, password, pin, pattern, finger ->
-                    val email = store.email()
-                    withContext(Dispatchers.Default) { store.save(email, password, pin, pattern, finger) }
+                onSave = { password, pin, pattern, finger ->
+                    withContext(Dispatchers.Default) { store.save(password, pin, pattern, finger) }
                     onChanged()
                 },
                 title = "CHANGE LOCK",
-                intro = "Choose at least two new ways to get back in: password, PIN, pattern, or fingerprint. They replace the ways you use now. Your recovery email stays the same.",
+                intro = "Choose at least two new ways to get back in: password, PIN, pattern, or fingerprint. They replace the ways you use now. Your recovery code stays the same.",
                 saveLabel = "Save new lock",
-                fixedEmail = store.email(),
                 onTurnOff = { confirmingOff = true },
             )
         }
@@ -755,13 +729,13 @@ fun LockChangePage(
     }
 }
 
-/** Change the recovery email from Settings, after the current lock is checked. */
+/** Settings > Recovery code: check the current lock, then create a new code (the old one stops working). */
 @Composable
-fun RecoveryEmailPage(
+fun RecoveryCodeSettingsPage(
     light: Boolean,
     store: LockStore,
     onClose: () -> Unit,
-    onChanged: () -> Unit,
+    onCreate: () -> Unit,
 ) {
     var verified by remember { mutableStateOf(false) }
     Box(
@@ -773,17 +747,14 @@ fun RecoveryEmailPage(
             CurrentLockCheck(
                 light = light,
                 store = store,
-                title = "RECOVERY EMAIL",
-                body = "Confirm it's you with one of the ways you set. Then enter the new email.",
+                title = "RECOVERY CODE",
+                body = "Confirm it's you with one of the ways you set. Then you can create a new recovery code.",
                 onClose = onClose,
                 onVerified = { verified = true },
             )
         } else {
             val ink = if (light) Color(0xFF2A2428) else Color.White
             val panel = if (light) Color(0xFFF7F4EF) else Color(0xFF12141A)
-            val field = if (light) Color.White else Color(0xFF1C1E26)
-            var email by remember { mutableStateOf(store.email()) }
-            var error by remember { mutableStateOf("") }
             Column(
                 Modifier
                     .fillMaxSize()
@@ -793,42 +764,140 @@ fun RecoveryEmailPage(
                     .padding(horizontal = 20.dp, vertical = 18.dp),
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("RECOVERY EMAIL", color = ink, fontSize = 13.sp, letterSpacing = 2.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text("RECOVERY CODE", color = ink, fontSize = 13.sp, letterSpacing = 2.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     Text("Close", color = ink.copy(alpha = 0.7f), modifier = Modifier.clickable(onClick = onClose).padding(8.dp))
                 }
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "If you forget how to unlock, Nyte Gallery sends a one-time code to this email. Codes sent to the old email stop working.",
+                    "Your recovery code gets you back in if you forget your unlock ways. Nyte Gallery cannot show your current code again. Creating a new code makes the old one stop working.",
                     color = ink.copy(alpha = 0.8f),
                     fontSize = 15.sp,
                     lineHeight = 21.sp,
                 )
                 Spacer(Modifier.height(16.dp))
-                Text("New recovery email", color = ink.copy(alpha = 0.55f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                LockField(email, field, ink, KeyboardType.Email, false, "name@email.com") { email = it; error = "" }
-                if (error.isNotEmpty()) {
-                    Text(error, color = LockPink, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
-                }
-                Spacer(Modifier.height(16.dp))
-                LockButton("Save email", LockPink, Color.White, Modifier.fillMaxWidth()) {
-                    val next = email.trim()
-                    when {
-                        !next.matches(EMAIL_PATTERN) -> error = "Enter a valid email"
-                        next.equals(store.email(), ignoreCase = true) -> onClose()
-                        else -> {
-                            store.updateEmail(next)
-                            onChanged()
-                        }
-                    }
-                }
+                LockButton("Create new recovery code", LockPink, Color.White, Modifier.fillMaxWidth(), onCreate)
             }
         }
     }
 }
 
-private val EMAIL_PATTERN = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+const val RECOVERY_WARNING =
+    "Write this code down and keep it somewhere safe. It is the ONLY way back in if you forget your unlock methods. " +
+        "Nyte Gallery cannot recover it for you. If you lose it and forget your lock, your photos cannot be opened."
 
-/** Checks the current lock with one of the saved ways. The email code is not offered here. */
+/**
+ * Shows a new recovery code once. [code] is null while it is being created.
+ * Continue needs the "written down" checkbox. There is no Close: the code is never shown again.
+ */
+@Composable
+fun RecoveryCodePage(light: Boolean, code: String?, note: String?, onDone: () -> Unit) {
+    val context = LocalContext.current
+    val ink = if (light) Color(0xFF2A2428) else Color.White
+    val panel = if (light) Color(0xFFF7F4EF) else Color(0xFF12141A)
+    val field = if (light) Color.White else Color(0xFF1C1E26)
+    var written by remember(code) { mutableStateOf(false) }
+    var copied by remember(code) { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(panel)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            .windowInsetsPadding(WindowInsets.systemBars)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 18.dp),
+    ) {
+        Text("RECOVERY CODE", color = ink, fontSize = 13.sp, letterSpacing = 2.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+        if (note != null) {
+            Text(note, color = ink.copy(alpha = 0.8f), fontSize = 15.sp, lineHeight = 21.sp)
+            Spacer(Modifier.height(12.dp))
+        }
+        Text(RECOVERY_WARNING, color = LockPink, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(18.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(field)
+                .padding(vertical = 18.dp, horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                code ?: "Creating code...",
+                color = ink,
+                fontSize = if (code != null) 22.sp else 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                letterSpacing = 1.sp,
+                textAlign = TextAlign.Center,
+            )
+        }
+        if (code != null) {
+            Text(
+                if (copied) "Copied. The clipboard is cleared in 1 minute." else "Copy",
+                color = ink,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 10.dp)
+                    .clickable { copyRecoveryCode(context, code); copied = true }
+                    .padding(8.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { written = !written }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(22.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (written) LockPink else field),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (written) Text("✓", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.size(12.dp))
+                Text("I have written down my recovery code", color = ink, fontSize = 15.sp)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        val ready = code != null && written
+        LockButton("Continue", if (ready) LockPink else ink.copy(alpha = 0.15f), if (ready) Color.White else ink.copy(alpha = 0.4f), Modifier.fillMaxWidth()) {
+            if (ready) onDone()
+        }
+    }
+}
+
+/** Copies the code as sensitive (hidden in the clipboard preview on Android 13+) and clears it after about 60 s. */
+private fun copyRecoveryCode(context: Context, code: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return
+    val clip = android.content.ClipData.newPlainText("Nyte Gallery recovery code", code)
+    if (android.os.Build.VERSION.SDK_INT >= 33) {
+        clip.description.extras = android.os.PersistableBundle().apply {
+            putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true)
+        }
+    }
+    clipboard.setPrimaryClip(clip)
+    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        try {
+            // Android 10+ may not let a background app read the clipboard; then clear anyway (best effort).
+            val current = clipboard.primaryClip
+            val ours = current == null || current.itemCount == 0 || current.getItemAt(0).text?.toString() == code
+            if (ours) {
+                if (android.os.Build.VERSION.SDK_INT >= 28) clipboard.clearPrimaryClip()
+                else clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+            }
+        } catch (_: Exception) {
+        }
+    }, 60_000L)
+}
+
+/** Checks the current lock with one of the saved ways. The recovery code is not offered here. */
 @Composable
 private fun CurrentLockCheck(
     light: Boolean,

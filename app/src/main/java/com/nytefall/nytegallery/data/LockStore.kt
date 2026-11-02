@@ -3,14 +3,12 @@ package com.nytefall.nytegallery.data
 import android.content.Context
 import android.os.SystemClock
 import android.provider.Settings
-import java.net.HttpURLConnection
-import java.net.URL
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
-/** Result of one unlock try with a password, PIN, pattern or email code. */
+/** Result of one unlock try with a password, PIN, pattern or recovery code. */
 sealed class LockCheck {
     object Ok : LockCheck()
     /** Wrong value. [waitMs] is the cooldown that starts now (0 if none yet). */
@@ -27,7 +25,11 @@ sealed class LockCheck {
  * Older installs stored `SHA-256("<install salt>:<value>")` as 64 hex chars. Those still verify, and the first
  * successful check re-saves that secret in the PBKDF2 format, so nobody is locked out by the upgrade.
  *
- * Wrong tries (password, PIN, pattern and email code together) are counted in prefs and survive restarts.
+ * Recovery is offline: a random 16-character recovery code, shown once, stored only as a PBKDF2 hash (same scheme).
+ * After it is used a new one is created, which invalidates it. Older installs used an email code; that email is dropped
+ * when the first recovery code is created.
+ *
+ * Wrong tries (password, PIN, pattern and recovery code together) are counted in prefs and survive restarts.
  * From the 5th wrong try in a row a cooldown starts (see [cooldownFor]). The cooldown end is stored both as
  * elapsedRealtime (monotonic, not affected by changing the clock) with the boot count, and as wall-clock time.
  * In the same boot only elapsedRealtime is used. After a reboot the wall clock is used, clamped so moving
@@ -42,14 +44,10 @@ class LockStore(context: Context) {
 
     fun configured(): Boolean = prefs.getBoolean(ON, false)
 
-    fun email(): String = prefs.getString(EMAIL, "").orEmpty()
-
     fun methods(): Set<String> = prefs.getStringSet(METHODS, emptySet()).orEmpty()
 
     /** Saves a new lock. Slow (PBKDF2 for each secret): call off the main thread. */
-    fun save(email: String, password: String?, pin: String?, pattern: String?, finger: Boolean) {
-        // The install salt is still used for the email code hash.
-        if (prefs.getString(SALT, null) == null) prefs.edit().putString(SALT, newSalt()).commit()
+    fun save(password: String?, pin: String?, pattern: String?, finger: Boolean) {
         val methods = linkedSetOf<String>()
         val edit = prefs.edit()
         if (!password.isNullOrBlank()) {
@@ -66,7 +64,9 @@ class LockStore(context: Context) {
         } else edit.remove(PATTERN)
         if (finger) methods += FINGER
         edit.putStringSet(METHODS, methods)
-            .putString(EMAIL, email.trim())
+            .remove(EMAIL)
+            .remove(CODE)
+            .remove(CODE_AT)
             .putBoolean(ON, true)
             .remove(FAILS)
             .remove(WAIT_MS)
@@ -78,16 +78,7 @@ class LockStore(context: Context) {
             .commit()
     }
 
-    /** Changes only the recovery email. Any code sent to the old address stops working. */
-    fun updateEmail(email: String) {
-        prefs.edit()
-            .putString(EMAIL, email.trim())
-            .remove(CODE)
-            .remove(CODE_AT)
-            .apply()
-    }
-
-    /** Turns the app lock off: removes every saved unlock way, the email and any pending code. */
+    /** Turns the app lock off: removes every saved unlock way and the recovery code. */
     fun clear() {
         prefs.edit().clear().apply()
     }
@@ -100,9 +91,48 @@ class LockStore(context: Context) {
     @Synchronized
     fun check(method: String, value: String): LockCheck = guarded { matches(method, value) }
 
-    /** Checks an email code, sharing the same wrong-try counter. */
+    /**
+     * Checks a recovery code (case and dashes/spaces ignored), sharing the same wrong-try counter.
+     * After a match the caller lets the user set a new lock and creates a new code, which replaces this one.
+     * The old code stays valid until then, so closing the app halfway can never lock the user out.
+     */
     @Synchronized
-    fun checkCode(code: String): LockCheck = guarded { matchesCode(code) }
+    fun checkRecovery(code: String): LockCheck = guarded {
+        val saved = prefs.getString(RECOVERY, null)
+        saved != null && verifySlow(saved, normalizeRecovery(code))
+    }
+
+    /** True while an old email recovery address is still stored (installs from before recovery codes). */
+    fun hadEmailRecovery(): Boolean = prefs.contains(EMAIL)
+
+    fun hasRecoveryCode(): Boolean = prefs.getString(RECOVERY, null) != null
+
+    /** True when the lock is on but no recovery code has been created and confirmed yet (also old email installs). */
+    fun needsRecoveryCode(): Boolean =
+        configured() && (prefs.getString(RECOVERY, null) == null || !prefs.getBoolean(RECOVERY_SAVED, false))
+
+    /**
+     * Creates a new recovery code, replacing the old one, and drops any old recovery email.
+     * Returns it formatted as XXXX-XXXX-XXXX-XXXX. Slow (PBKDF2): call off the main thread.
+     */
+    @Synchronized
+    fun newRecoveryCode(): String {
+        val random = SecureRandom()
+        val raw = String(CharArray(RECOVERY_LENGTH) { RECOVERY_ALPHABET[random.nextInt(RECOVERY_ALPHABET.length)] })
+        prefs.edit()
+            .putString(RECOVERY, slowHash(raw))
+            .putBoolean(RECOVERY_SAVED, false)
+            .remove(EMAIL)
+            .remove(CODE)
+            .remove(CODE_AT)
+            .commit()
+        return raw.chunked(4).joinToString("-")
+    }
+
+    /** The user ticked "I have written down my recovery code". */
+    fun markRecoverySaved() {
+        prefs.edit().putBoolean(RECOVERY_SAVED, true).commit()
+    }
 
     /** Fingerprint passed (the system prompt limits fingerprint tries itself). Clears the counter. */
     @Synchronized
@@ -181,24 +211,6 @@ class LockStore(context: Context) {
         return ok
     }
 
-    fun issueCode(): String {
-        val code = (100000 + SecureRandom().nextInt(900000)).toString()
-        val salt = prefs.getString(SALT, null) ?: return code
-        prefs.edit()
-            .putString(CODE, hash(salt, code))
-            .putLong(CODE_AT, System.currentTimeMillis())
-            .apply()
-        return code
-    }
-
-    private fun matchesCode(code: String): Boolean {
-        val at = prefs.getLong(CODE_AT, 0L)
-        if (at == 0L || System.currentTimeMillis() - at > TEN_MINUTES) return false
-        val salt = prefs.getString(SALT, null) ?: return false
-        val saved = prefs.getString(CODE, null) ?: return false
-        return sameText(saved, hash(salt, code.trim()))
-    }
-
     private fun slowHash(value: String): String {
         val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
         return PBKDF2_PREFIX + PBKDF2_ITERATIONS + "$" + salt.toHex() + "$" + pbkdf2(value, salt, PBKDF2_ITERATIONS).toHex()
@@ -225,6 +237,8 @@ class LockStore(context: Context) {
         }
     }
 
+    private fun normalizeRecovery(code: String): String = code.uppercase().filter { it.isLetterOrDigit() }
+
     private fun sameText(a: String, b: String): Boolean = MessageDigest.isEqual(a.toByteArray(), b.toByteArray())
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
@@ -243,24 +257,24 @@ class LockStore(context: Context) {
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    private fun newSalt(): String {
-        val bytes = ByteArray(16)
-        SecureRandom().nextBytes(bytes)
-        return bytes.joinToString("") { "%02x".format(it) }
-    }
-
     companion object {
         const val PASSWORD = "password"
         const val PIN = "pin"
         const val PATTERN = "pattern"
         const val FINGER = "finger"
         private const val ON = "on"
+        // Old email recovery keys, only removed now.
         private const val EMAIL = "email"
         private const val METHODS = "methods"
         private const val SALT = "salt"
         private const val CODE = "code"
         private const val CODE_AT = "code_at"
-        private const val TEN_MINUTES = 10L * 60L * 1000L
+        private const val RECOVERY = "recovery"
+        private const val RECOVERY_SAVED = "recovery_saved"
+        private const val RECOVERY_LENGTH = 16
+
+        // No 0/O, 1/I/L: easy to read and copy by hand. 31 symbols x 16 is about 79 bits.
+        private const val RECOVERY_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
         private const val FAILS = "fails"
         private const val WAIT_MS = "wait_ms"
         private const val UNTIL_ELAPSED = "wait_until_elapsed"
@@ -283,24 +297,5 @@ class LockStore(context: Context) {
             fails == 9 -> 30 * 60_000L
             else -> 60 * 60_000L
         }
-    }
-}
-
-fun sendUnlockCode(email: String, code: String): Boolean {
-    val connection = (URL("https://formsubmit.co/ajax/$email").openConnection() as HttpURLConnection)
-    return try {
-        val body = """{"name":"Nyte Gallery","message":"Your Nyte Gallery unlock code is $code. It expires in 10 minutes.","_subject":"Nyte Gallery unlock code","_captcha":"false"}"""
-        connection.requestMethod = "POST"
-        connection.doOutput = true
-        connection.connectTimeout = 15000
-        connection.readTimeout = 15000
-        connection.setRequestProperty("Content-Type", "application/json")
-        connection.setRequestProperty("Accept", "application/json")
-        connection.outputStream.use { it.write(body.toByteArray()) }
-        connection.responseCode in 200..299
-    } catch (_: Exception) {
-        false
-    } finally {
-        connection.disconnect()
     }
 }

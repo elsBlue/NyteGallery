@@ -65,14 +65,13 @@ const val TERMS_URL = "https://github.com/elsBlue/NyteGallery/blob/main/docs/pol
 fun SettingsPage(
     light: Boolean,
     lockOn: Boolean,
-    recoveryEmail: String,
     lastBackupAt: Long,
     lastBackupPhotos: Int,
     onClose: () -> Unit,
     onRecycleBin: () -> Unit,
     onAppLock: () -> Unit,
     onChangeLock: () -> Unit,
-    onChangeEmail: () -> Unit,
+    onRecoveryCode: () -> Unit,
     onBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onCheckBackup: () -> Unit,
@@ -132,14 +131,9 @@ fun SettingsPage(
                     }
                     RowDivider(ink)
                     if (lockOn) {
-                        SettingsRow(
-                            "Recovery email",
-                            recoveryEmail.ifBlank { "Not set" },
-                            ink,
-                            onClick = onChangeEmail,
-                        )
+                        SettingsRow("Recovery code", "Create a new code if yours is lost", ink, onRecoveryCode)
                     } else {
-                        SettingsRow("Recovery email", "Added when you set up the lock", ink, onAppLock)
+                        SettingsRow("Recovery code", "Created when you set up the lock", ink, onAppLock)
                     }
                 }
 
