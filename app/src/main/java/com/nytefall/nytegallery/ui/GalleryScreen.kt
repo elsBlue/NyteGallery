@@ -126,7 +126,9 @@ private val AddGreen = Color(0xFF2F9B68)
 
 private const val CARD_LIMIT = 16
 private const val LABEL_LIMIT = 22
-private const val SCREENSHOTS_ALLOWED = true
+// false: FLAG_SECURE is on for the whole app (also the lock screen), which blocks screenshots and screen
+// recording and hides the app's preview in Recent apps. Also applied in MainActivity.onCreate before the first frame.
+internal const val SCREENSHOTS_ALLOWED = false
 private val CardHeader = 34.dp
 
 // Landscape (list closed): cards live in the left share of the width, the info panel in the rest.
@@ -234,13 +236,13 @@ fun GalleryScreen(
         controller.isAppearanceLightNavigationBars = light
     }
     val host = LocalHostActivity.current
-    DisposableEffect(locked, host) {
+    DisposableEffect(host) {
         val window = host?.window
         if (window != null) {
-            if (locked || SCREENSHOTS_ALLOWED) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            if (SCREENSHOTS_ALLOWED) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
             else window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
-        onDispose { host?.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+        onDispose { }
     }
 
     val chain = remember { arrayOfNulls<ActivityResultLauncher<IntentSenderRequest>>(1) }
@@ -742,7 +744,7 @@ fun GalleryScreen(
                 light = light,
                 onClose = { settingLock = false },
                 onSave = { email, password, pin, pattern, finger ->
-                    lockStore.save(email, password, pin, pattern, finger)
+                    withContext(Dispatchers.Default) { lockStore.save(email, password, pin, pattern, finger) }
                     settingLock = false
                     locked = true
                 },

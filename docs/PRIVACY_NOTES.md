@@ -32,7 +32,8 @@ There are no user accounts, no sign-in, and no Nyte server. **[CODE]**
 | Thumbnails (384 px) | `files/vault/<id>.thumb2.nyt`, encrypted the same way **[CODE]** | No |
 | Photo index: id, name, date taken, trash date, file name | `files/vault/index.json`, app-private, **not encrypted** (plain JSON) **[CODE]** | Inside backup files only (encrypted there) |
 | Decoded images | In memory only (LRU cache) while the app runs **[CODE]** | No |
-| App lock secrets (password, PIN, pattern) | SharedPreferences `nyte_lock`, stored as salted SHA-256 hashes, never plain text **[CODE]** | No |
+| App lock secrets (password, PIN, pattern) | SharedPreferences `nyte_lock`, stored as PBKDF2-HMAC-SHA256 hashes with a random salt per secret, never plain text **[CODE]** | No |
+| Wrong-try counter and cooldown end time | SharedPreferences `nyte_lock` **[CODE]** | No |
 | Fingerprint | Handled by Android BiometricPrompt. The app never sees fingerprint data, only "success". **[CODE]** | No |
 | Recovery email address | SharedPreferences `nyte_lock`, plain text **[CODE]** | **Yes**, sent to FormSubmit when a recovery code is requested (see 2.1) |
 | One-time recovery code | Hash plus time in `nyte_lock`, valid 10 minutes **[CODE]** | **Yes**, the code itself is sent in the email body via FormSubmit |
@@ -81,9 +82,26 @@ permission is needed for them. **[CODE]**
 - **Backup files** (`.nybak`, format v2): PBKDF2-HMAC-SHA256 with 600,000 iterations and a 16-byte random salt
   derive a 256-bit key from the user's backup password. Each photo is an AES-256-GCM entry with its own random IV.
   An encrypted trailer records the photo count so a cut-off file is detected. **[CODE]**
-- **App lock**: password, PIN and pattern are stored as `SHA-256(salt:value)` with one random salt per install. **[CODE]**
-  **[ASSUMPTION / improvement]** A slow hash (PBKDF2 or similar) would be stronger. Do not describe this as
-  "military grade" in public text.
+- **App lock** (since 2026-11-02): password, PIN and pattern are stored as
+  `pbkdf2$<iterations>$<salt>$<hash>`: PBKDF2-HMAC-SHA256, 210,000 iterations, a 16-byte random salt per secret,
+  256-bit output, checked with a constant-time compare, off the main thread. **[CODE]**
+  - Migration: older installs stored `SHA-256(install salt:value)`. Those still verify; on the first successful
+    check the secret is re-saved in the PBKDF2 format. Nobody is locked out. **[CODE]**
+  - The iteration count is stored in each hash, so it can be raised later the same way.
+  - A 4 to 6 digit PIN is still a small space for an offline attack on a rooted phone; the real protection is
+    app-private storage plus the wrong-try limit. Do not describe this as "military grade" in public text.
+- **Wrong-try limit** (since 2026-11-02): wrong passwords, PINs, patterns and email codes are counted together on
+  the unlock screen and on the "confirm it's you" step of Change lock, Recovery email and Turn off lock.
+  4 free tries, then a wait of 30 s (5th wrong), 1 min (6th), 5 min (7th), 15 min (8th), 30 min (9th), and 1 hour
+  for each wrong try after that. The counter survives closing the app and is cleared by any success (including
+  fingerprint). Nothing is ever wiped. The try is counted before the value is checked, so killing the app during
+  the check does not skip it. **[CODE]**
+  - Clock safety: the end of the wait is stored as `elapsedRealtime` (not changed by the clock setting) plus the
+    boot count, and as wall-clock time. In the same boot only `elapsedRealtime` counts. After a reboot the wall
+    clock is used, clamped to the full wait, and a clock set to before the wait started restarts the full wait.
+    Rebooting *and* moving the clock forward can shorten a wait; acceptable for an app-level lock.
+  - Fingerprint tries are limited by Android's own BiometricPrompt, not counted by the app, and still work during
+    a wait.
 - Index file `index.json` (photo names and dates) is stored in plain text inside app-private storage. **[CODE]**
   Policy text should say "photos are encrypted", not "everything is encrypted", unless this is changed.
 
@@ -208,15 +226,16 @@ Biometric only) and in the code: **[CODE]**
 2. **Release signing key**: create an upload keystore, enrol in Play App Signing, keep the keystore and passwords
    **outside the public repo** (GitHub Actions secrets if CI signs). Never commit it.
 3. **Build an AAB** (`bundleRelease`) for Play; keep versionCode increasing.
-4. **Set `SCREENSHOTS_ALLOWED = false`** for release (`ui/GalleryScreen.kt`) so FLAG_SECURE blocks screenshots
-   and the recents preview. Currently `true` for development.
+4. **Screenshots locked**: DONE 2026-11-02. `SCREENSHOTS_ALLOWED = false` (`ui/GalleryScreen.kt`), FLAG_SECURE is set
+   in `MainActivity.onCreate` and kept on for every screen including the lock screen, so screenshots, screen
+   recording and the Recent apps preview are blocked.
 5. **Decide on FormSubmit** email recovery (keep and disclose, replace, or remove). This changes the Data safety
    answers and the policy text.
 6. **Host the Privacy Policy** at a public URL, for example GitHub Pages
    (`https://<user>.github.io/<repo>/privacy`) or a page on a Nytefall site. Play needs the URL in the store listing
    and, ideally, a link inside the app.
 7. **Contact email** nytefall.interactive@gmail.com: enable 2FA, use it in Play Console and the policy.
-8. Consider encrypting `index.json` (photo names) and using a slow hash for app lock secrets before claiming
-   "everything is encrypted".
+8. Consider encrypting `index.json` (photo names) before claiming "everything is encrypted".
+   Slow hash for app lock secrets: DONE 2026-11-02 (PBKDF2, see section 4), with a wrong-try limit.
 9. Sample photos bundled in the app: confirm their licence before publishing. **[ASSUMPTION: source unknown]**
 10. Re-read the merged manifest of the release build to confirm the final permission list (libraries can add some).

@@ -1,6 +1,7 @@
 package com.nytefall.nytegallery
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -12,11 +13,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nytefall.nytegallery.ui.GalleryScreen
 import com.nytefall.nytegallery.ui.GalleryViewModel
 import com.nytefall.nytegallery.ui.LocalHostActivity
+import com.nytefall.nytegallery.ui.SCREENSHOTS_ALLOWED
 import com.nytefall.nytegallery.ui.theme.SAOGalleryTheme
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Set before any content is drawn, so screenshots and the Recent apps preview never show the vault.
+        if (!SCREENSHOTS_ALLOWED) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(
                 android.graphics.Color.TRANSPARENT,

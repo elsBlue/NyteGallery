@@ -33,9 +33,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -62,7 +65,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.nytefall.nytegallery.R
+import com.nytefall.nytegallery.data.LockCheck
 import com.nytefall.nytegallery.data.LockStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.min
 
 private val LockPink = Color(0xFFFF4D6A)
@@ -155,7 +164,7 @@ fun LockConfirm(light: Boolean, body: String, confirm: String, onDismiss: () -> 
 fun LockSetupPage(
     light: Boolean,
     onClose: () -> Unit,
-    onSave: (email: String, password: String?, pin: String?, pattern: String?, finger: Boolean) -> Unit,
+    onSave: suspend (email: String, password: String?, pin: String?, pattern: String?, finger: Boolean) -> Unit,
     title: String = "LOCK",
     intro: String = "Set how Nyte Gallery locks. Choose at least two ways to get back in: password, PIN, pattern, or fingerprint. Add an email so a forgotten method can be recovered with a code.",
     saveLabel: String = "Lock app",
@@ -175,6 +184,8 @@ fun LockSetupPage(
     var finger by remember { mutableStateOf(false) }
     var open by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf("") }
+    var saving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val readyCount = listOf(password, pin, pattern).count { it != null } + if (finger) 1 else 0
     val emailOk = email.trim().matches(Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"))
     Column(
@@ -249,9 +260,18 @@ fun LockSetupPage(
         Text("$readyCount of 2 ways set", color = ink.copy(alpha = 0.55f), fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
         Spacer(Modifier.height(16.dp))
         val canSave = emailOk && readyCount >= 2
-        LockButton(saveLabel, if (canSave) LockPink else ink.copy(alpha = 0.15f), if (canSave) Color.White else ink.copy(alpha = 0.4f), Modifier.fillMaxWidth()) {
-            if (canSave) onSave(email.trim(), password, pin, pattern, finger)
-            else error = if (!emailOk) "Enter a valid email" else "Set at least two unlock ways"
+        LockButton(if (saving) "Saving..." else saveLabel, if (canSave) LockPink else ink.copy(alpha = 0.15f), if (canSave) Color.White else ink.copy(alpha = 0.4f), Modifier.fillMaxWidth()) {
+            if (saving) return@LockButton
+            if (canSave) {
+                saving = true
+                scope.launch {
+                    try {
+                        onSave(email.trim(), password, pin, pattern, finger)
+                    } finally {
+                        saving = false
+                    }
+                }
+            } else error = if (!emailOk) "Enter a valid email" else "Set at least two unlock ways"
         }
         if (onTurnOff != null) {
             Text(
@@ -286,6 +306,7 @@ fun LockGate(
     var error by remember { mutableStateOf("") }
     var emailMode by remember { mutableStateOf(false) }
     var sending by remember { mutableStateOf(false) }
+    val tries = rememberLockTries(store)
     BoxWithConstraints(
         Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.systemBars),
     ) {
@@ -338,8 +359,15 @@ fun LockGate(
             emailMode -> {
                 LockField(value, field, ink, KeyboardType.Number, false, "6-digit code") { if (it.length <= 6) value = it.filter { ch -> ch.isDigit() } }
                 Spacer(Modifier.height(14.dp))
-                LockButton("Unlock", LockPink, Color.White, Modifier.fillMaxWidth()) {
-                    if (store.matchesCode(value)) onUnlocked() else error = "That code is wrong or expired"
+                LockButton(if (tries.checking) "Checking..." else "Unlock", LockPink, Color.White, Modifier.fillMaxWidth()) {
+                    val typed = value
+                    tries.attempt({ store.checkCode(typed) }) { result ->
+                        when (result) {
+                            LockCheck.Ok -> onUnlocked()
+                            is LockCheck.Wrong -> error = if (result.waitMs > 0L) "" else "That code is wrong or expired"
+                            is LockCheck.Wait -> error = ""
+                        }
+                    }
                 }
                 Text(
                     if (sending) "Sending..." else "Send a new code",
@@ -358,12 +386,18 @@ fun LockGate(
                 LockButton("Use fingerprint", LockPink, Color.White, Modifier.fillMaxWidth()) {
                     val host = activity
                     if (host == null) error = "Couldn't open the fingerprint prompt"
-                    else promptFingerprint(host, "Unlock Nyte Gallery", onUnlocked) { error = it }
+                    else promptFingerprint(host, "Unlock Nyte Gallery", { store.noteSuccess(); onUnlocked() }) { error = it }
                 }
             }
             method == LockStore.PATTERN -> {
                 PatternPad(ink) { drawn ->
-                    if (store.matches(LockStore.PATTERN, drawn)) onUnlocked() else error = "Pattern does not match"
+                    tries.attempt({ store.check(LockStore.PATTERN, drawn) }) { result ->
+                        when (result) {
+                            LockCheck.Ok -> onUnlocked()
+                            is LockCheck.Wrong -> error = if (result.waitMs > 0L) "" else "Pattern does not match"
+                            is LockCheck.Wait -> error = ""
+                        }
+                    }
                 }
             }
             else -> {
@@ -372,12 +406,21 @@ fun LockGate(
                     value = if (numeric) it.filter { ch -> ch.isDigit() }.take(6) else it
                 }
                 Spacer(Modifier.height(14.dp))
-                LockButton("Unlock", LockPink, Color.White, Modifier.fillMaxWidth()) {
-                    if (store.matches(method, value)) onUnlocked() else error = "That ${method.replaceFirstChar { it.uppercase() }} is not right"
+                LockButton(if (tries.checking) "Checking..." else "Unlock", LockPink, Color.White, Modifier.fillMaxWidth()) {
+                    val way = method
+                    val typed = value
+                    tries.attempt({ store.check(way, typed) }) { result ->
+                        when (result) {
+                            LockCheck.Ok -> onUnlocked()
+                            is LockCheck.Wrong -> error = if (result.waitMs > 0L) "" else "That ${way.replaceFirstChar { it.uppercase() }} is not right"
+                            is LockCheck.Wait -> error = ""
+                        }
+                    }
                 }
             }
         }
-        if (error.isNotEmpty()) Text(error, color = LockPink, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
+        val shown = if (tries.waitMs > 0L) waitMessage(tries.waitMs) else error
+        if (shown.isNotEmpty()) Text(shown, color = LockPink, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
         if (!emailMode) {
             Spacer(Modifier.height(18.dp))
             Text(
@@ -684,7 +727,8 @@ fun LockChangePage(
                 light = light,
                 onClose = onClose,
                 onSave = { _, password, pin, pattern, finger ->
-                    store.save(store.email(), password, pin, pattern, finger)
+                    val email = store.email()
+                    withContext(Dispatchers.Default) { store.save(email, password, pin, pattern, finger) }
                     onChanged()
                 },
                 title = "CHANGE LOCK",
@@ -803,6 +847,7 @@ private fun CurrentLockCheck(
     var method by remember { mutableStateOf(methods.firstOrNull { it != LockStore.FINGER } ?: methods.firstOrNull()) }
     var value by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
+    val tries = rememberLockTries(store)
     Column(
         Modifier
             .fillMaxSize()
@@ -844,12 +889,18 @@ private fun CurrentLockCheck(
                 LockButton("Use fingerprint", LockPink, Color.White, Modifier.fillMaxWidth()) {
                     val host = activity
                     if (host == null) error = "Couldn't open the fingerprint prompt"
-                    else promptFingerprint(host, "Confirm it's you", onVerified) { error = it }
+                    else promptFingerprint(host, "Confirm it's you", { store.noteSuccess(); onVerified() }) { error = it }
                 }
             }
             LockStore.PATTERN -> {
                 PatternPad(ink) { drawn ->
-                    if (store.matches(LockStore.PATTERN, drawn)) onVerified() else error = "Pattern does not match"
+                    tries.attempt({ store.check(LockStore.PATTERN, drawn) }) { result ->
+                        when (result) {
+                            LockCheck.Ok -> onVerified()
+                            is LockCheck.Wrong -> error = if (result.waitMs > 0L) "" else "Pattern does not match"
+                            is LockCheck.Wait -> error = ""
+                        }
+                    }
                 }
             }
             else -> {
@@ -858,11 +909,71 @@ private fun CurrentLockCheck(
                     value = if (numeric) it.filter { ch -> ch.isDigit() }.take(6) else it
                 }
                 Spacer(Modifier.height(14.dp))
-                LockButton("Continue", LockPink, Color.White, Modifier.fillMaxWidth()) {
-                    if (store.matches(current, value)) onVerified() else error = "That ${current.replaceFirstChar { it.uppercase() }} is not right"
+                LockButton(if (tries.checking) "Checking..." else "Continue", LockPink, Color.White, Modifier.fillMaxWidth()) {
+                    val typed = value
+                    tries.attempt({ store.check(current, typed) }) { result ->
+                        when (result) {
+                            LockCheck.Ok -> onVerified()
+                            is LockCheck.Wrong -> error = if (result.waitMs > 0L) "" else "That ${current.replaceFirstChar { it.uppercase() }} is not right"
+                            is LockCheck.Wait -> error = ""
+                        }
+                    }
                 }
             }
         }
-        if (error.isNotEmpty()) Text(error, color = LockPink, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
+        val shown = if (tries.waitMs > 0L) waitMessage(tries.waitMs) else error
+        if (shown.isNotEmpty()) Text(shown, color = LockPink, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
     }
+}
+
+/**
+ * Runs lock checks off the main thread (PBKDF2 is slow) and keeps the cooldown countdown.
+ * The wrong-try counter itself lives in [LockStore], so it is shared by every lock screen and survives restarts.
+ */
+private class LockTries(private val store: LockStore, private val scope: CoroutineScope) {
+    var checking by mutableStateOf(false)
+    var waitMs by mutableLongStateOf(store.waitRemainingMs())
+
+    fun attempt(run: () -> LockCheck, onResult: (LockCheck) -> Unit) {
+        if (checking || waitMs > 0L) return
+        checking = true
+        scope.launch {
+            val result = try {
+                withContext(Dispatchers.Default) { run() }
+            } finally {
+                checking = false
+            }
+            when (result) {
+                is LockCheck.Wrong -> if (result.waitMs > 0L) waitMs = result.waitMs
+                is LockCheck.Wait -> waitMs = result.waitMs
+                LockCheck.Ok -> waitMs = 0L
+            }
+            onResult(result)
+        }
+    }
+}
+
+@Composable
+private fun rememberLockTries(store: LockStore): LockTries {
+    val scope = rememberCoroutineScope()
+    val tries = remember(store) { LockTries(store, scope) }
+    val waiting = tries.waitMs > 0L
+    LaunchedEffect(tries, waiting) {
+        while (tries.waitMs > 0L) {
+            val step = tries.waitMs % 1000L
+            delay(if (step == 0L) 1000L else step)
+            tries.waitMs = store.waitRemainingMs()
+        }
+    }
+    return tries
+}
+
+private fun waitMessage(ms: Long): String {
+    val seconds = (ms + 999L) / 1000L
+    val time = if (seconds >= 3600L) {
+        "%d:%02d:%02d".format(seconds / 3600L, seconds / 60L % 60L, seconds % 60L)
+    } else {
+        "%d:%02d".format(seconds / 60L, seconds % 60L)
+    }
+    return "Too many wrong tries. Try again in $time."
 }
