@@ -207,6 +207,8 @@ fun GalleryScreen(
     var choosingDevice by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var backupOpen by remember { mutableStateOf(false) }
+    var settingsOpen by remember { mutableStateOf(false) }
+    var aboutOpen by remember { mutableStateOf(false) }
     var importBackup by remember { mutableStateOf(false) }
     var backupBusy by remember { mutableStateOf(false) }
     var backupError by remember { mutableStateOf<String?>(null) }
@@ -378,6 +380,8 @@ fun GalleryScreen(
             menuOpen = false
             backupOpen = false
             importBackup = false
+            settingsOpen = false
+            aboutOpen = false
         }
     }
 
@@ -407,6 +411,8 @@ fun GalleryScreen(
             locked -> Unit
             backupOpen -> if (!backupBusy) backupOpen = false
             importBackup -> if (!backupBusy) importBackup = false
+            aboutOpen -> aboutOpen = false
+            settingsOpen -> settingsOpen = false
             menuOpen -> menuOpen = false
             choosingDevice -> choosingDevice = false
             viewing -> viewing = false
@@ -754,7 +760,57 @@ fun GalleryScreen(
                     menuOpen = false
                     importBackup = true
                 },
+                onSettings = {
+                    menuOpen = false
+                    settingsOpen = true
+                },
+                onAbout = {
+                    menuOpen = false
+                    aboutOpen = true
+                },
             )
+        }
+        // Hidden (not closed) while Backup or Restore backup is on top, so Back returns here.
+        if (settingsOpen && !locked && !backupOpen && !importBackup) {
+            SettingsPage(
+                light = light,
+                lockOn = lockStore.configured(),
+                recoveryEmail = lockStore.email(),
+                lastBackupAt = backupPrefs.lastBackupAt(),
+                lastBackupPhotos = backupPrefs.lastBackupPhotos(),
+                onClose = { settingsOpen = false },
+                onRecycleBin = {
+                    if (state.trash.isEmpty()) {
+                        Toast.makeText(context, "Trash is empty", Toast.LENGTH_SHORT).show()
+                    } else {
+                        settingsOpen = false
+                        galleryOpen = false
+                        trashOpen = true
+                    }
+                },
+                onAppLock = {
+                    settingsOpen = false
+                    confirmingLock = true
+                },
+                onBackup = {
+                    backupError = null
+                    backupGuide = !backupPrefs.guideSeen()
+                    backupOpen = true
+                },
+                onRestoreBackup = {
+                    backupError = null
+                    restoreNote = null
+                    importBackup = true
+                },
+                onCheckBackup = {
+                    backupError = null
+                    restoreNote = null
+                    importBackup = true
+                },
+            )
+        }
+        if (aboutOpen && !locked) {
+            AboutPage(light = light, onClose = { aboutOpen = false })
         }
         val saved = backupSaved
         if (backupOpen && !locked && saved != null) {

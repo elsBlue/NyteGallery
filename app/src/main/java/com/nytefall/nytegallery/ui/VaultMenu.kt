@@ -69,6 +69,8 @@ fun MenuSidebar(
     onClose: () -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
+    onSettings: () -> Unit,
+    onAbout: () -> Unit,
 ) {
     val panel = if (light) Color(0xFFF7F4EF) else Color(0xFF171920)
     val ink = if (light) Color(0xFF2A2428) else Color.White
@@ -88,10 +90,17 @@ fun MenuSidebar(
                 Text("Close", color = ink.copy(alpha = 0.7f), modifier = Modifier.clickable(onClick = onClose).padding(8.dp))
             }
             Spacer(Modifier.height(22.dp))
-            MenuRow("Backup", "Save an encrypted copy you can keep", ink, onBackup)
-            Spacer(Modifier.height(8.dp))
-            MenuRow("Restore backup", "Bring photos back from a backup file", ink, onRestore)
-            Spacer(Modifier.weight(1f))
+            // Scrolls only when the rows do not fit (short landscape screens).
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                MenuRow("Backup", "Save an encrypted copy you can keep", ink, onBackup)
+                Spacer(Modifier.height(8.dp))
+                MenuRow("Restore backup", "Bring photos back from a backup file", ink, onRestore)
+                Spacer(Modifier.height(8.dp))
+                MenuRow("Settings", "Trash, cache, lock and backup", ink, onSettings)
+                Spacer(Modifier.height(8.dp))
+                MenuRow("About", "Version, feedback, privacy and terms", ink, onAbout)
+                Spacer(Modifier.height(12.dp))
+            }
             Text(
                 "The phone key cannot move to a new device. A backup uses a password only you know.",
                 color = ink.copy(alpha = 0.55f),
