@@ -1261,6 +1261,7 @@ private fun Stage(
             rotation = state.rotation,
             activeIndex = state.activeIndex,
             onOpen = onOpen,
+            light = light,
         )
         Text(
             text = "NYTE GALLERY",
@@ -1426,6 +1427,7 @@ private fun BoxWithConstraintsFill(
     rotation: Float,
     activeIndex: Int,
     onOpen: () -> Unit,
+    light: Boolean,
 ) {
     androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -1472,6 +1474,7 @@ private fun BoxWithConstraintsFill(
                 photo = photo,
                 featured = index == activeIndex,
                 onOpen = onOpen,
+                light = light,
                 fillWidth = fillWidth,
                 fillHeight = fillHeight,
                 modifier = Modifier
@@ -1511,15 +1514,18 @@ private fun PortraitWindow(
     onOpen: () -> Unit,
     fillWidth: Int,
     fillHeight: Int,
+    light: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val headerColor = if (light) Paper else Color(0xFF1C1E26)
+    val headerInk = if (light) Ink else Color(0xFFF3ECE8)
     Column(modifier) {
         Row(
             Modifier
                 .fillMaxWidth()
                 .height(CardHeader)
                 .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-                .background(Paper)
+                .background(headerColor)
                 .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1531,7 +1537,7 @@ private fun PortraitWindow(
             Text(
                 text = clipName(photo.name, CARD_LIMIT),
                 modifier = Modifier.padding(start = 8.dp).weight(1f),
-                color = Ink.copy(alpha = 0.72f),
+                color = headerInk.copy(alpha = 0.72f),
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1540,7 +1546,7 @@ private fun PortraitWindow(
             if (year.isNotEmpty()) {
                 Text(
                     text = year,
-                    color = Ink.copy(alpha = 0.55f),
+                    color = headerInk.copy(alpha = 0.55f),
                     fontSize = 12.sp,
                 )
             }
