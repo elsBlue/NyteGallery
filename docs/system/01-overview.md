@@ -14,6 +14,12 @@ photos can be:
 - backed up to a password-encrypted file and restored from one;
 - protected with an app lock that has an offline recovery code.
 
+**First run.** The launcher activity starts on `Theme.SAOGallery.Starting`, so a splash screen
+(`androidx.core:core-splashscreen`, on every supported Android version) shows the night-card icon on `bg_night`
+only while the app starts. There's no added delay. On a fresh install, three **welcome pages** follow (see
+[UI §7.10](07-ui.md#710-splash-screen-and-welcome-pages)). They're shown once and end either in lock setup ("Get
+started") or on the home screen ("Later" / "Skip"). Installs that already have a vault or a lock never see them.
+
 On first launch, six sample photos are bundled as drawables and seeded into the gallery (see
 `data/GalleryRepository.kt`). They are not encrypted, because they ship inside the APK.
 
@@ -28,6 +34,7 @@ On first launch, six sample photos are bundled as drawables and seeded into the 
 | UI | Jetpack Compose, BOM **2024.12.01** (ui, ui-graphics, foundation, material3, tooling-preview; ui-tooling for debug only) | `app/build.gradle.kts` |
 | Activity | `androidx.activity:activity-compose:1.9.3` | |
 | Core | `androidx.core:core-ktx:1.15.0` | |
+| Splash | `androidx.core:core-splashscreen:1.0.1` | launch theme `Theme.SAOGallery.Starting` |
 | EXIF | `androidx.exifinterface:exifinterface:1.3.7` | |
 | Lifecycle | `lifecycle-viewmodel-ktx`, `lifecycle-viewmodel-compose`, `lifecycle-runtime-ktx` **2.8.7** | |
 | Biometrics | `androidx.biometric:biometric:1.1.0` | |

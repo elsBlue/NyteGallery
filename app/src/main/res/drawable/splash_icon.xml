@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash icon: the launcher icon layers on a 108dp canvas. The splash masks it to a centred circle of 2/3 the size
+     (units 18..90), and the night card art stays within about 28 units of the centre, so nothing is cut off. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_launcher_background" />
+    <item android:drawable="@drawable/ic_launcher_foreground" />
+</layer-list>

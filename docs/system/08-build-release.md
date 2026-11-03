@@ -12,7 +12,7 @@
 | applicationId = namespace | `com.nytefall.nytegallery` (**don't change it**) |
 | versionCode / versionName | 1 / "1.0" |
 | Compose BOM | 2024.12.01 (ui, foundation, material3) |
-| Other libraries | activity-compose 1.9.3, core-ktx 1.15.0, exifinterface 1.3.7, lifecycle 2.8.7 (viewmodel, viewmodel-compose, runtime), biometric 1.1.0, fragment-ktx 1.8.5 |
+| Other libraries | activity-compose 1.9.3, core-ktx 1.15.0, core-splashscreen 1.0.1, exifinterface 1.3.7, lifecycle 2.8.7 (viewmodel, viewmodel-compose, runtime), biometric 1.1.0, fragment-ktx 1.8.5 |
 | `buildFeatures` | `compose = true`, `buildConfig = true` (for `BuildConfig.VERSION_NAME`) |
 | Repositories | `google()`, `mavenCentral()` (plus `gradlePluginPortal()` for plugins), `FAIL_ON_PROJECT_REPOS` |
 

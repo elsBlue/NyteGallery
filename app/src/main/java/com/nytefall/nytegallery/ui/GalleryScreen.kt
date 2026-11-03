@@ -84,6 +84,7 @@ import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.vector.PathParser
@@ -196,6 +197,8 @@ fun GalleryScreen(
     trashExplained: () -> Boolean,
     onTrashExplained: () -> Unit,
     transfer: TransferProgress? = null,
+    showOnboarding: Boolean = false,
+    onOnboardingDone: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val lockStore = remember { LockStore(context) }
@@ -204,6 +207,8 @@ fun GalleryScreen(
     var locked by remember { mutableStateOf(lockStore.configured()) }
     var confirmingLock by remember { mutableStateOf(false) }
     var settingLock by remember { mutableStateOf(false) }
+    // First-launch welcome pages; saveable so a recreated activity keeps showing them.
+    var onboarding by rememberSaveable { mutableStateOf(showOnboarding) }
     // "lock" or "code" while changing the lock or creating a new recovery code from Settings.
     var changingLock by remember { mutableStateOf<String?>(null) }
     // A new recovery code is being created (null code) or shown once.
@@ -1017,6 +1022,25 @@ fun GalleryScreen(
                     locked = true
                 }
             }
+        }
+        if (onboarding && !locked) {
+            WelcomePages(
+                light = light,
+                onSkip = {
+                    onboarding = false
+                    onOnboardingDone()
+                },
+                onGetStarted = {
+                    onboarding = false
+                    onOnboardingDone()
+                    // Same path as the lock button's "Continue": lock setup, then the recovery code, then locked.
+                    settingLock = true
+                },
+                onLater = {
+                    onboarding = false
+                    onOnboardingDone()
+                },
+            )
         }
     }
 }

@@ -17,7 +17,8 @@ Everything lives in app-private internal storage (`Context.filesDir`). Other app
 ├── shared_prefs/
 │   ├── nyte_gallery.xml              # seeded, trash_explained
 │   ├── nyte_lock.xml                 # app-lock settings and hashes (see 04-app-lock.md)
-│   └── nyte_backup.xml               # guide_seen, last_backup_at, last_backup_photos
+│   ├── nyte_backup.xml               # guide_seen, last_backup_at, last_backup_photos
+│   └── nyte_onboarding.xml           # done (welcome pages finished or skipped)
 └── cache/                            # only temporary files; "Clear cache" empties it
 ```
 
@@ -133,6 +134,7 @@ IV (12 bytes) | AES-256-GCM ciphertext of the original file bytes | GCM tag (16 
 | `nyte_gallery` | `seeded` (bool), `trash_explained` (bool: the first-time "Move to Trash" notice was shown) | `VaultStore` |
 | `nyte_lock` | see [App lock §4.3](04-app-lock.md#43-lockstore-storage) | `LockStore` |
 | `nyte_backup` | `guide_seen` (bool), `last_backup_at` (ms), `last_backup_photos` (int) | `BackupPrefs` |
+| `nyte_onboarding` | `done` (bool: welcome pages finished, skipped, or not needed because the install already had a vault or a lock) | `OnboardingPrefs` |
 
 "Clear cache" (Settings) deletes the contents of `cacheDir` and `externalCacheDir` only, and reports the bytes
 freed. It never touches `files/vault` or the prefs. In the current code nothing obvious writes to the cache
