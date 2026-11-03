@@ -1760,8 +1760,22 @@ private fun TrashGrid(
     modifier: Modifier = Modifier,
 ) {
     val ink = if (light) Color(0xFF2A2428) else Color.White
+    // Small green note after restoring; quick taps add up ("3 images restored").
+    var restoredCount by remember { mutableStateOf(0) }
+    var restoredStamp by remember { mutableStateOf(0L) }
+    var noteText by remember { mutableStateOf("") }
+    LaunchedEffect(restoredStamp) {
+        if (restoredStamp != 0L) {
+            kotlinx.coroutines.delay(2000)
+            restoredCount = 0
+        }
+    }
+    if (restoredCount > 0) {
+        noteText = if (restoredCount == 1) "1 image restored" else "$restoredCount images restored"
+    }
+    Box(modifier.fillMaxSize()) {
     Column(
-        modifier
+        Modifier
             .fillMaxSize()
             .background(if (light) Color(0xFFF7F4EF) else Color(0xFF0C0D11))
             .windowInsetsPadding(WindowInsets.systemBars)
@@ -1811,7 +1825,11 @@ private fun TrashGrid(
                             .size(28.dp)
                             .clip(CircleShape)
                             .background(Color.Black.copy(alpha = 0.55f))
-                            .clickable { onRestore(photo.id) },
+                            .clickable {
+                                onRestore(photo.id)
+                                restoredCount += 1
+                                restoredStamp = System.nanoTime()
+                            },
                         contentAlignment = Alignment.Center,
                     ) {
                         RestoreGlyph()
@@ -1819,6 +1837,31 @@ private fun TrashGrid(
                 }
             }
         }
+    }
+    androidx.compose.animation.AnimatedVisibility(
+        visible = restoredCount > 0,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .windowInsetsPadding(WindowInsets.systemBars)
+            .padding(bottom = 68.dp),
+        enter = androidx.compose.animation.fadeIn() +
+            androidx.compose.animation.slideInVertically(initialOffsetY = { it / 2 }),
+        exit = androidx.compose.animation.fadeOut() +
+            androidx.compose.animation.slideOutVertically(targetOffsetY = { it / 2 }),
+    ) {
+        Row(
+            Modifier
+                .shadow(6.dp, CircleShape)
+                .clip(CircleShape)
+                .background(AddGreen)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text("✓", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(noteText, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
     }
 }
 
