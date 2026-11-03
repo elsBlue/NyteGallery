@@ -44,9 +44,12 @@ data class GalleryUiState(
     val activeIndex: Int,
 )
 
-data class ImportOutcome(
+/** imported > 0 means the originals are kept until the user picks Remove or Keep. */
+data class ImportOutcome(val imported: Int)
+
+/** Result of removing the originals after the user chose "Remove originals". */
+data class RemovalOutcome(
     val consent: IntentSender?,
-    val imported: Int,
     val alreadyRemoved: Boolean,
 )
 
@@ -108,6 +111,8 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
     val transfer: StateFlow<TransferProgress?> = _transfer
     private var transferring = false
     private var deleteQueue: List<List<Uri>> = emptyList()
+    // Originals of the last import, untouched until the user chooses to remove or keep them.
+    private var pendingOriginals: List<Uri> = emptyList()
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -363,14 +368,33 @@ class GalleryViewModel(app: Application) : AndroidViewModel(app) {
                 closeTransfer()
             }
             if (imported.isEmpty()) {
-                onReady(ImportOutcome(null, 0, false))
+                onReady(ImportOutcome(0))
                 return@launch
             }
             showIndex(start)
-            val removal = withContext(Dispatchers.IO) { planRemoval(imported.map { it.first }) }
-            deleteQueue = removal.rest
-            onReady(ImportOutcome(removal.consent, imported.size, removal.alreadyRemoved))
+            deleteQueue = emptyList()
+            pendingOriginals = imported.map { it.first }
+            onReady(ImportOutcome(imported.size))
         }
+    }
+
+    /** The user chose "Remove originals": start removing the last import's originals from the device gallery. */
+    fun removeOriginals(onReady: (RemovalOutcome) -> Unit) {
+        val uris = pendingOriginals
+        if (uris.isEmpty()) return
+        pendingOriginals = emptyList()
+        deleteQueue = emptyList()
+        viewModelScope.launch {
+            val removal = withContext(Dispatchers.IO) { planRemoval(uris) }
+            deleteQueue = removal.rest
+            onReady(RemovalOutcome(removal.consent, removal.alreadyRemoved))
+        }
+    }
+
+    /** The user chose "Keep originals": nothing is deleted. */
+    fun keepOriginals() {
+        pendingOriginals = emptyList()
+        deleteQueue = emptyList()
     }
 
     private fun takenMillis(resolver: android.content.ContentResolver, uri: Uri): Long {

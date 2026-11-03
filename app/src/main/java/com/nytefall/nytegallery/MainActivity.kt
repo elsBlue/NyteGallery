@@ -46,6 +46,8 @@ class MainActivity : FragmentActivity() {
                     onImport = viewModel::importFromDevice,
                     onNextDelete = viewModel::nextDeleteStep,
                     onCancelDelete = viewModel::clearDeleteQueue,
+                    onRemoveOriginals = viewModel::removeOriginals,
+                    onKeepOriginals = viewModel::keepOriginals,
                     onRename = viewModel::rename,
                     onTrash = viewModel::moveToTrash,
                     onRestore = viewModel::restore,

@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -100,6 +101,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
@@ -179,6 +182,8 @@ fun GalleryScreen(
     onImport: (List<String>, (ImportOutcome) -> Unit) -> Unit,
     onNextDelete: () -> DeleteStep,
     onCancelDelete: () -> Unit,
+    onRemoveOriginals: ((RemovalOutcome) -> Unit) -> Unit,
+    onKeepOriginals: () -> Unit,
     onRename: (Int, String) -> Unit,
     onTrash: (Int) -> Unit,
     onRestore: (String) -> Unit,
@@ -225,6 +230,8 @@ fun GalleryScreen(
     var restoreOpen by remember { mutableStateOf(false) }
     var emptyingTrash by remember { mutableStateOf(false) }
     var choosingDevice by remember { mutableStateOf(false) }
+    // Photos just moved in from the device gallery; > 0 shows the "remove originals?" sheet.
+    var originalsToAsk by remember { mutableStateOf(0) }
     var menuOpen by remember { mutableStateOf(false) }
     var backupOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
@@ -275,6 +282,21 @@ fun GalleryScreen(
         }
     }
     chain[0] = deleteConsent
+    val removeOriginals = {
+        originalsToAsk = 0
+        onRemoveOriginals { outcome ->
+            when {
+                outcome.consent != null -> deleteConsent.launch(IntentSenderRequest.Builder(outcome.consent).build())
+                outcome.alreadyRemoved -> Toast.makeText(context, "Encrypted inside Nyte Gallery and removed from your gallery", Toast.LENGTH_LONG).show()
+                else -> Toast.makeText(context, "Saved in Nyte Gallery, but still visible in your other gallery", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    val keepOriginals = {
+        originalsToAsk = 0
+        onKeepOriginals()
+        Toast.makeText(context, "Originals kept in your gallery", Toast.LENGTH_SHORT).show()
+    }
     val photoAccess = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         if (granted.values.any { it }) choosingDevice = true
         else Toast.makeText(context, "Photo access is needed to move images out of your gallery", Toast.LENGTH_SHORT).show()
@@ -443,6 +465,7 @@ fun GalleryScreen(
             settingLock -> settingLock = false
             confirmingLock -> confirmingLock = false
             locked -> Unit
+            originalsToAsk > 0 -> keepOriginals()
             changingLock != null -> changingLock = null
             backupOpen -> if (!backupBusy) backupOpen = false
             importBackup -> if (!backupBusy) importBackup = false
@@ -742,14 +765,22 @@ fun GalleryScreen(
                     choosingDevice = false
                     galleryOpen = true
                     onImport(uris.map { it.toString() }) { outcome ->
-                        when {
-                            outcome.imported == 0 -> Toast.makeText(context, "Couldn't read those photos", Toast.LENGTH_SHORT).show()
-                            outcome.consent != null -> deleteConsent.launch(IntentSenderRequest.Builder(outcome.consent).build())
-                            outcome.alreadyRemoved -> Toast.makeText(context, "Encrypted inside Nyte Gallery and removed from your gallery", Toast.LENGTH_LONG).show()
-                            else -> Toast.makeText(context, "Saved in Nyte Gallery, but still visible in your other gallery", Toast.LENGTH_LONG).show()
+                        if (outcome.imported == 0) {
+                            Toast.makeText(context, "Couldn't read those photos", Toast.LENGTH_SHORT).show()
+                        } else {
+                            originalsToAsk = outcome.imported
                         }
                     }
                 },
+            )
+        }
+        if (originalsToAsk > 0 && !locked && transfer == null) {
+            RemoveOriginalsOverlay(
+                light = light,
+                count = originalsToAsk,
+                systemConfirms = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R,
+                onRemove = removeOriginals,
+                onKeep = keepOriginals,
             )
         }
         if (confirmingLock && !locked) {
@@ -1183,10 +1214,10 @@ private fun RestorePage(
                     Modifier
                         .aspectRatio(1f)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFD9D3CC))
+                        .background(photoBase(light))
                         .clickable { selected = if (on) selected - photo.id else selected + photo.id },
                 ) {
-                    PhotoImage(photo, Modifier.fillMaxSize(), maxEdge = VAULT_THUMB_EDGE)
+                    PhotoImage(photo, Modifier.fillMaxSize(), maxEdge = VAULT_THUMB_EDGE, shimmerLight = light)
                     if (on) {
                         Box(Modifier.fillMaxSize().background(Color(0x552F9B68)))
                         Box(
@@ -1559,9 +1590,9 @@ private fun PortraitWindow(
                 .weight(1f)
                 .shadow(24.dp, RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
                 .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
-                .background(Color(0xFFD9D3CC)),
+                .background(photoBase(light)),
         ) {
-            PhotoImage(photo, Modifier.fillMaxSize(), maxEdge = fillWidth, fillHeight = fillHeight)
+            PhotoImage(photo, Modifier.fillMaxSize(), maxEdge = fillWidth, fillHeight = fillHeight, shimmerLight = light)
             if (featured) {
                 Box(
                     Modifier
@@ -1674,20 +1705,43 @@ private fun PhotoImage(
     contentScale: ContentScale = ContentScale.Crop,
     maxEdge: Int = 1080,
     fillHeight: Int = maxEdge,
+    // Card/grid placeholders: soft moving highlight while the photo decodes (light picks the highlight strength).
+    shimmerLight: Boolean? = null,
 ) {
     if (photo.vaultFile != null) {
         val context = LocalContext.current
         val fill = contentScale == ContentScale.Crop
         var bitmap by remember(photo.vaultFile, maxEdge, fillHeight, fill) { mutableStateOf<ImageBitmap?>(null) }
+        var failed by remember(photo.vaultFile, maxEdge, fillHeight, fill) { mutableStateOf(false) }
         LaunchedEffect(photo.vaultFile, maxEdge, fillHeight, fill) {
             val decoded = withContext(vaultDecodeDispatcher) {
                 val store = VaultStore(context)
                 if (fill) store.decodeFill(photo, maxEdge, fillHeight) else store.decode(photo, maxEdge)
             }
             bitmap = decoded?.asImageBitmap()
+            failed = decoded == null
         }
         bitmap?.let {
             Image(it, contentDescription = photo.name, modifier = modifier, contentScale = contentScale)
+        }
+        if (shimmerLight != null) {
+            val loading = bitmap == null && !failed
+            // Short wait first, so photos that are already cached don't flash the shimmer.
+            var armed by remember(photo.vaultFile, maxEdge, fillHeight, fill) { mutableStateOf(false) }
+            LaunchedEffect(loading) {
+                if (loading) {
+                    kotlinx.coroutines.delay(150)
+                    armed = true
+                }
+            }
+            val shown by androidx.compose.animation.core.animateFloatAsState(
+                targetValue = if (loading && armed) 1f else 0f,
+                animationSpec = androidx.compose.animation.core.tween(durationMillis = 280),
+                label = "shimmer",
+            )
+            if (shown > 0.01f) {
+                LoadingShimmer(modifier.alpha(shown), shimmerLight)
+            }
         }
     } else if (photo.imageRes != 0) {
         Image(
@@ -1697,6 +1751,37 @@ private fun PhotoImage(
             contentScale = contentScale,
         )
     }
+}
+
+/** Placeholder color under a photo while it loads (or if it can't be read). */
+private fun photoBase(light: Boolean): Color = if (light) Color(0xFFD9D3CC) else Color(0xFF2A2E38)
+
+@Composable
+private fun LoadingShimmer(modifier: Modifier, light: Boolean) {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmer")
+    val progress = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(durationMillis = 1300, easing = androidx.compose.animation.core.LinearEasing),
+        ),
+        label = "shimmerProgress",
+    )
+    val glow = if (light) Color.White.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.09f)
+    Box(
+        modifier.drawBehind {
+            val band = size.width.coerceAtLeast(size.height) * 0.6f
+            val travel = size.width + size.height + band * 2f
+            val start = -band + travel * progress.value - size.height
+            drawRect(
+                Brush.linearGradient(
+                    colors = listOf(Color.Transparent, glow, Color.Transparent),
+                    start = Offset(start, 0f),
+                    end = Offset(start + band, size.height * 0.6f),
+                ),
+            )
+        },
+    )
 }
 
 @Composable
@@ -1738,10 +1823,10 @@ private fun PhotoGrid(
                     Modifier
                         .aspectRatio(1f)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFD9D3CC))
+                        .background(photoBase(light))
                         .clickable { onPick(index) },
                 ) {
-                    PhotoImage(photo, Modifier.fillMaxSize(), maxEdge = VAULT_THUMB_EDGE)
+                    PhotoImage(photo, Modifier.fillMaxSize(), maxEdge = VAULT_THUMB_EDGE, shimmerLight = light)
                     if (index == activeIndex) {
                         Box(Modifier.fillMaxSize().background(Color(0x33FF4D6A)))
                     }
@@ -1815,9 +1900,9 @@ private fun TrashGrid(
                     Modifier
                         .aspectRatio(1f)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFD9D3CC)),
+                        .background(photoBase(light)),
                 ) {
-                    PhotoImage(photo, Modifier.fillMaxSize(), maxEdge = VAULT_THUMB_EDGE)
+                    PhotoImage(photo, Modifier.fillMaxSize(), maxEdge = VAULT_THUMB_EDGE, shimmerLight = light)
                     Box(
                         Modifier
                             .align(Alignment.BottomEnd)
@@ -1879,6 +1964,111 @@ private fun ActionChip(ink: Color, onClick: () -> Unit, glyph: @Composable () ->
             androidx.compose.material3.LocalContentColor provides ink,
         ) {
             glyph()
+        }
+    }
+}
+
+@Composable
+private fun RemoveOriginalsOverlay(
+    light: Boolean,
+    count: Int,
+    systemConfirms: Boolean,
+    onRemove: () -> Unit,
+    onKeep: () -> Unit,
+) {
+    val panel = if (light) Color(0xFFF7F3EE) else Color(0xFF1C1E26)
+    val ink = if (light) Color(0xFF2A2428) else Color.White
+    val title = if (count == 1) "1 photo is now safe in Nyte Gallery" else "$count photos are now safe in Nyte Gallery"
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.56f))
+            .clickable(onClick = onKeep),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .padding(horizontal = 28.dp, vertical = 12.dp)
+                .wideCap()
+                .fillMaxWidth()
+                .shadow(24.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
+                .background(panel)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(AddGreen),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("✓", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                title,
+                color = ink,
+                fontSize = 17.sp,
+                lineHeight = 23.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "They're encrypted and only open with your lock.",
+                color = ink.copy(alpha = 0.82f),
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "The original copies are still in your phone's gallery, where anyone can see them. Remove them so these photos are only in Nyte Gallery?",
+                color = ink.copy(alpha = 0.82f),
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            if (systemConfirms) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Android will ask you to confirm on the next screen.",
+                    color = ink.copy(alpha = 0.6f),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(DotA)
+                    .clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Remove originals", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            }
+            Spacer(Modifier.height(10.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(ink.copy(alpha = 0.12f))
+                    .clickable(onClick = onKeep),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Keep originals", color = ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            }
         }
     }
 }
