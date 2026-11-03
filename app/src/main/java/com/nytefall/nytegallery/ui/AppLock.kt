@@ -74,7 +74,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.min
 
-private val LockPink = Color(0xFFFF4D6A)
+internal val LockPink = Color(0xFFFF4D6A)
 private val LockGreen = Color(0xFF2F9B68)
 
 // Only Class 3 (BIOMETRIC_STRONG) biometrics are accepted, so weak face unlock can never open the app.
@@ -143,7 +143,15 @@ fun promptFingerprint(activity: FragmentActivity, title: String, onSuccess: () -
 }
 
 @Composable
-fun LockConfirm(light: Boolean, body: String, confirm: String, onDismiss: () -> Unit, onConfirm: () -> Unit, title: String = "LOCK APP") {
+fun LockConfirm(
+    light: Boolean,
+    body: String,
+    confirm: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+    title: String = "LOCK APP",
+    dismissLabel: String = "Close",
+) {
     val panel = if (light) Color(0xFFF7F3EE) else Color(0xFF1C1E26)
     val ink = if (light) Color(0xFF2A2428) else Color.White
     Box(
@@ -165,7 +173,7 @@ fun LockConfirm(light: Boolean, body: String, confirm: String, onDismiss: () -> 
             Text(body, color = ink.copy(alpha = 0.82f), fontSize = 15.sp, lineHeight = 21.sp, textAlign = TextAlign.Center)
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                LockButton("Close", ink.copy(alpha = 0.12f), ink, Modifier.weight(1f), onDismiss)
+                LockButton(dismissLabel, ink.copy(alpha = 0.12f), ink, Modifier.weight(1f), onDismiss)
                 LockButton(confirm, LockPink, Color.White, Modifier.weight(1f), onConfirm)
             }
         }
@@ -180,7 +188,6 @@ fun LockSetupPage(
     title: String = "LOCK",
     intro: String = "Set how Nyte Gallery locks. Choose at least two ways to get back in: password, PIN, pattern, or fingerprint. Next you get a recovery code for the day you forget them.",
     saveLabel: String = "Lock app",
-    onTurnOff: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val activity = LocalHostActivity.current ?: findActivity(context)
@@ -276,18 +283,6 @@ fun LockSetupPage(
                     }
                 }
             } else error = "Set at least two unlock ways"
-        }
-        if (onTurnOff != null) {
-            Text(
-                "Turn off app lock",
-                color = LockPink,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(top = 18.dp)
-                    .clickable(onClick = onTurnOff)
-                    .padding(8.dp),
-            )
         }
     }
 }
@@ -690,21 +685,22 @@ fun LockGlyph() {
     }
 }
 
+private fun methodLabel(method: String): String = when (method) {
+    LockStore.PASSWORD -> "Password"
+    LockStore.PIN -> "PIN"
+    LockStore.PATTERN -> "Pattern"
+    LockStore.FINGER -> "Fingerprint"
+    else -> method.replaceFirstChar { it.uppercase() }
+}
+
 /**
- * Change the lock from Settings. The current lock is checked first with one of the saved ways
- * (password, PIN, pattern or fingerprint), then the same setup rules apply to the new lock.
- * The recovery code is kept. Saving uses LockStore.save, so the stored format does not change.
+ * Settings > Manage lock. The current lock is checked first with one of the saved ways, then each way
+ * (password, PIN, pattern, fingerprint) can be added, changed or removed on its own, keeping at least
+ * [LockStore.MIN_METHODS]. The other ways and the recovery code are not touched.
  */
 @Composable
-fun LockChangePage(
-    light: Boolean,
-    store: LockStore,
-    onClose: () -> Unit,
-    onChanged: () -> Unit,
-    onTurnedOff: () -> Unit,
-) {
+fun ManageLockPage(light: Boolean, store: LockStore, onClose: () -> Unit) {
     var verified by remember { mutableStateOf(false) }
-    var confirmingOff by remember { mutableStateOf(false) }
     Box(
         Modifier
             .fillMaxSize()
@@ -714,34 +710,256 @@ fun LockChangePage(
             CurrentLockCheck(
                 light = light,
                 store = store,
-                title = "CHANGE LOCK",
-                body = "Confirm it's you with one of the ways you set now. Then choose new ways to unlock.",
+                title = "MANAGE LOCK",
+                body = "Confirm it's you with one of the ways you set now. Then you can add, change or remove ways to unlock.",
                 onClose = onClose,
                 onVerified = { verified = true },
             )
         } else {
-            LockSetupPage(
+            ManageLockMethods(light, store, onClose)
+        }
+    }
+}
+
+@Composable
+private fun ManageLockMethods(light: Boolean, store: LockStore, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val activity = LocalHostActivity.current ?: findActivity(context)
+    val ink = if (light) Color(0xFF2A2428) else Color.White
+    val panel = if (light) Color(0xFFF7F4EF) else Color(0xFF12141A)
+    val field = if (light) Color.White else Color(0xFF1C1E26)
+    val fingerOk = remember { fingerprintAvailable(context) }
+    var saved by remember { mutableStateOf(store.methods()) }
+    var open by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf("") }
+    var notice by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val canRemove = saved.size > LockStore.MIN_METHODS
+
+    fun saveWay(method: String, value: String?) {
+        if (busy) return
+        busy = true
+        error = ""
+        notice = ""
+        scope.launch {
+            val ok = try {
+                withContext(Dispatchers.Default) { store.setMethod(method, value) }
+                true
+            } catch (cancel: kotlin.coroutines.cancellation.CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                false
+            } finally {
+                busy = false
+            }
+            saved = store.methods()
+            if (ok) {
+                open = null
+                notice = "${methodLabel(method)} saved"
+            } else {
+                error = "Couldn't save that. Please try again."
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(panel)
+                .windowInsetsPadding(WindowInsets.stableBars)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("MANAGE LOCK", color = ink, fontSize = 13.sp, letterSpacing = 2.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("Close", color = ink.copy(alpha = 0.7f), modifier = Modifier.clickable(onClick = onClose).padding(8.dp))
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Add, change or remove the ways Nyte Gallery unlocks. Keep at least two on. Your recovery code stays the same.",
+                color = ink.copy(alpha = 0.8f),
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
+            )
+            Spacer(Modifier.height(16.dp))
+            listOf(LockStore.PASSWORD, LockStore.PIN, LockStore.PATTERN, LockStore.FINGER).forEach { method ->
+                androidx.compose.runtime.key(method) {
+                    val on = method in saved
+                    val isFinger = method == LockStore.FINGER
+                    if (isFinger && !fingerOk && !on) {
+                        Text("Fingerprint is not available on this phone.", color = ink.copy(alpha = 0.45f), fontSize = 13.sp, modifier = Modifier.padding(vertical = 8.dp))
+                    } else {
+                        ManageMethodRow(
+                            label = methodLabel(method),
+                            on = on,
+                            ink = ink,
+                            field = field,
+                            canAddOrChange = !isFinger || fingerOk,
+                            changeable = !isFinger,
+                            canRemove = canRemove,
+                            onAddOrChange = {
+                                error = ""
+                                notice = ""
+                                if (isFinger) {
+                                    open = null
+                                    val host = activity
+                                    if (host == null) error = "Couldn't open the fingerprint prompt"
+                                    else promptFingerprint(host, "Confirm fingerprint", { saveWay(LockStore.FINGER, null) }, { error = it })
+                                } else {
+                                    open = if (open == method) null else method
+                                }
+                            },
+                            onRemove = {
+                                error = ""
+                                notice = ""
+                                if (canRemove) removing = method else error = "Keep at least 2 ways to unlock"
+                            },
+                        )
+                        if (open == method) {
+                            when (method) {
+                                LockStore.PASSWORD -> SecretPair(ink, field, KeyboardType.Password, "New password", "At least 6 characters", "Confirm password", "Type it again") { first, second ->
+                                    when {
+                                        first.length < 6 -> error = "Password needs at least 6 characters"
+                                        first != second -> error = "Those passwords do not match"
+                                        else -> saveWay(LockStore.PASSWORD, first)
+                                    }
+                                }
+                                LockStore.PIN -> SecretPair(ink, field, KeyboardType.NumberPassword, "New PIN", "4 to 6 digits", "Confirm PIN", "Type the same PIN again") { first, second ->
+                                    when {
+                                        !first.matches(Regex("\\d{4,6}")) -> error = "PIN must be 4 to 6 digits"
+                                        first != second -> error = "Those PINs do not match"
+                                        else -> saveWay(LockStore.PIN, first)
+                                    }
+                                }
+                                LockStore.PATTERN -> PatternConfirm(ink) { value -> saveWay(LockStore.PATTERN, value) }
+                            }
+                        }
+                    }
+                }
+            }
+            if (!canRemove) {
+                Text("Keep at least 2 ways to unlock", color = ink.copy(alpha = 0.55f), fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+            }
+            if (busy) {
+                Text("Saving...", color = ink.copy(alpha = 0.7f), fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+            if (error.isNotEmpty()) {
+                Text(error, color = LockPink, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+            } else if (notice.isNotEmpty()) {
+                Text(notice, color = LockGreen, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+        val pendingRemove = removing
+        if (pendingRemove != null) {
+            LockConfirm(
                 light = light,
-                onClose = onClose,
-                onSave = { password, pin, pattern, finger ->
-                    withContext(Dispatchers.Default) { store.save(password, pin, pattern, finger) }
-                    onChanged()
+                title = "REMOVE",
+                body = "Remove ${methodLabel(pendingRemove)} as a way to unlock Nyte Gallery?",
+                confirm = "Remove",
+                dismissLabel = "Cancel",
+                onDismiss = { removing = null },
+                onConfirm = {
+                    removing = null
+                    if (open == pendingRemove) open = null
+                    scope.launch {
+                        val removed = withContext(Dispatchers.Default) { store.removeMethod(pendingRemove) }
+                        saved = store.methods()
+                        if (removed) notice = "${methodLabel(pendingRemove)} removed" else error = "Keep at least 2 ways to unlock"
+                    }
                 },
-                title = "CHANGE LOCK",
-                intro = "Choose at least two new ways to get back in: password, PIN, pattern, or fingerprint. They replace the ways you use now. Your recovery code stays the same.",
-                saveLabel = "Save new lock",
-                onTurnOff = { confirmingOff = true },
             )
         }
-        if (confirmingOff) {
+    }
+}
+
+@Composable
+private fun ManageMethodRow(
+    label: String,
+    on: Boolean,
+    ink: Color,
+    field: Color,
+    canAddOrChange: Boolean,
+    changeable: Boolean,
+    canRemove: Boolean,
+    onAddOrChange: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column(
+        Modifier
+            .padding(vertical = 6.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(field)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = ink, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            Text(
+                if (on) "On" else "Off",
+                color = if (on) Color.White else ink.copy(alpha = 0.72f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(if (on) LockGreen else ink.copy(alpha = 0.08f))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            )
+        }
+        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!on && canAddOrChange) ManageChip("Add", ink, ink, true, onAddOrChange)
+            if (on && changeable && canAddOrChange) ManageChip("Change", ink, ink, true, onAddOrChange)
+            if (on) ManageChip("Remove", LockPink, ink, canRemove, onRemove)
+        }
+    }
+}
+
+@Composable
+private fun ManageChip(label: String, color: Color, ink: Color, enabled: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        color = color.copy(alpha = if (enabled) 1f else 0.35f),
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(ink.copy(alpha = 0.08f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+    )
+}
+
+/**
+ * Settings > Turn off lock: check the current lock, then warn. Turning off deletes every unlock way, the
+ * recovery code and any unconfirmed code. The photos' encryption doesn't change.
+ */
+@Composable
+fun TurnOffLockPage(light: Boolean, store: LockStore, onClose: () -> Unit, onTurnedOff: () -> Unit) {
+    var verified by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
+    ) {
+        CurrentLockCheck(
+            light = light,
+            store = store,
+            title = "TURN OFF LOCK",
+            body = "Confirm it's you with one of the ways you set now.",
+            onClose = onClose,
+            onVerified = { verified = true },
+        )
+        if (verified) {
             LockConfirm(
                 light = light,
                 title = "TURN OFF LOCK",
-                body = "Turn off the app lock? Anyone with this phone can open Nyte Gallery until you set a lock again. Your photos stay encrypted.",
+                body = "Anyone with this phone can open Nyte Gallery. Your recovery code will stop working. Photos stay encrypted.",
                 confirm = "Turn off",
-                onDismiss = { confirmingOff = false },
+                dismissLabel = "Cancel",
+                onDismiss = onClose,
                 onConfirm = {
-                    confirmingOff = false
                     store.clear()
                     onTurnedOff()
                 },

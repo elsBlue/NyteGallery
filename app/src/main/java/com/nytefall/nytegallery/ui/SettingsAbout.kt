@@ -70,8 +70,9 @@ fun SettingsPage(
     onClose: () -> Unit,
     onRecycleBin: () -> Unit,
     onAppLock: () -> Unit,
-    onChangeLock: () -> Unit,
+    onManageLock: () -> Unit,
     onRecoveryCode: () -> Unit,
+    onTurnOffLock: () -> Unit,
     onBackup: () -> Unit,
     onRestoreBackup: () -> Unit,
     onCheckBackup: () -> Unit,
@@ -125,7 +126,7 @@ fun SettingsPage(
                 SectionLabel("Security", ink)
                 SettingsCard(card) {
                     if (lockOn) {
-                        SettingsRow("Change lock", "On · Change how Nyte Gallery unlocks", ink, onChangeLock)
+                        SettingsRow("Manage lock", "On · Add, change or remove ways to unlock", ink, onManageLock)
                     } else {
                         SettingsRow("App lock", "Off · Tap to set up a lock", ink, onAppLock)
                     }
@@ -134,6 +135,10 @@ fun SettingsPage(
                         SettingsRow("Recovery code", "Create a new code if yours is lost", ink, onRecoveryCode)
                     } else {
                         SettingsRow("Recovery code", "Created when you set up the lock", ink, onAppLock)
+                    }
+                    if (lockOn) {
+                        RowDivider(ink)
+                        SettingsRow("Turn off lock", "Anyone with this phone could open Nyte Gallery", ink, onTurnOffLock, titleColor = LockPink)
                     }
                 }
 
@@ -273,12 +278,19 @@ private fun RowDivider(ink: Color) {
 }
 
 @Composable
-private fun SettingsRow(title: String, body: String, ink: Color, onClick: (() -> Unit)?, enabled: Boolean = true) {
+private fun SettingsRow(
+    title: String,
+    body: String,
+    ink: Color,
+    onClick: (() -> Unit)?,
+    enabled: Boolean = true,
+    titleColor: Color = ink,
+) {
     val base = Modifier.fillMaxWidth()
     val clickable = if (onClick != null) base.clickable(enabled = enabled, onClick = onClick) else base
     Row(clickable.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = ink.copy(alpha = if (enabled) 1f else 0.45f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(title, color = titleColor.copy(alpha = if (enabled) 1f else 0.45f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text(body, color = ink.copy(alpha = 0.62f), fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
         }
         if (onClick != null) {

@@ -89,9 +89,42 @@ class LockStore(context: Context) {
             .commit()
     }
 
-    /** Turns the app lock off: removes every saved unlock way and the recovery code. */
+    /**
+     * Adds or replaces one unlock way: a password, PIN or pattern [value] (hashed like [save]), or fingerprint
+     * ([value] is ignored). The other ways and the recovery code stay as they are. Slow: call off the main thread.
+     */
+    @Synchronized
+    fun setMethod(method: String, value: String?) {
+        val methods = LinkedHashSet(methods())
+        val edit = prefs.edit()
+        when (method) {
+            PASSWORD, PIN, PATTERN -> {
+                val secret = if (method == PASSWORD) value?.trim() else value
+                require(!secret.isNullOrEmpty()) { "Empty $method" }
+                edit.putString(method, slowHash(secret))
+            }
+            FINGER -> Unit
+            else -> throw IllegalArgumentException("Unknown unlock way $method")
+        }
+        methods += method
+        edit.putStringSet(METHODS, methods).commit()
+    }
+
+    /** Removes one unlock way if more than [MIN_METHODS] are saved. Returns false if it was kept. */
+    @Synchronized
+    fun removeMethod(method: String): Boolean {
+        val methods = LinkedHashSet(methods())
+        if (method !in methods || methods.size <= MIN_METHODS) return false
+        methods -= method
+        val edit = prefs.edit()
+        if (method != FINGER) edit.remove(method)
+        edit.putStringSet(METHODS, methods).commit()
+        return true
+    }
+
+    /** Turns the app lock off: removes every saved unlock way, the recovery code and any unconfirmed code. */
     fun clear() {
-        prefs.edit().clear().apply()
+        prefs.edit().clear().commit()
     }
 
     /**
@@ -358,6 +391,9 @@ class LockStore(context: Context) {
         const val PIN = "pin"
         const val PATTERN = "pattern"
         const val FINGER = "finger"
+
+        /** A lock always keeps at least this many unlock ways. */
+        const val MIN_METHODS = 2
         private const val ON = "on"
         // Old email recovery keys, only removed now.
         private const val EMAIL = "email"

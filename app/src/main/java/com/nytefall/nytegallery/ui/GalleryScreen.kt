@@ -210,7 +210,7 @@ fun GalleryScreen(
     var settingLock by remember { mutableStateOf(false) }
     // First-launch welcome pages; saveable so a recreated activity keeps showing them.
     var onboarding by rememberSaveable { mutableStateOf(showOnboarding) }
-    // "lock" or "code" while changing the lock or creating a new recovery code from Settings.
+    // "lock", "code" or "off" while managing the lock, creating a new recovery code or turning the lock off from Settings.
     var changingLock by remember { mutableStateOf<String?>(null) }
     // A new recovery code is being created (null code) or shown once.
     var makingRecovery by remember { mutableStateOf(false) }
@@ -920,8 +920,9 @@ fun GalleryScreen(
                     settingsOpen = false
                     confirmingLock = true
                 },
-                onChangeLock = { changingLock = "lock" },
+                onManageLock = { changingLock = "lock" },
                 onRecoveryCode = { changingLock = "code" },
+                onTurnOffLock = { changingLock = "off" },
                 onBackup = {
                     backupError = null
                     backupGuide = !backupPrefs.guideSeen()
@@ -940,14 +941,16 @@ fun GalleryScreen(
             )
         }
         if (changingLock == "lock" && !locked) {
-            LockChangePage(
+            ManageLockPage(
                 light = light,
                 store = lockStore,
                 onClose = { changingLock = null },
-                onChanged = {
-                    changingLock = null
-                    Toast.makeText(context, "Lock updated", Toast.LENGTH_SHORT).show()
-                },
+            )
+        } else if (changingLock == "off" && !locked) {
+            TurnOffLockPage(
+                light = light,
+                store = lockStore,
+                onClose = { changingLock = null },
                 onTurnedOff = {
                     changingLock = null
                     Toast.makeText(context, "App lock is off", Toast.LENGTH_SHORT).show()
