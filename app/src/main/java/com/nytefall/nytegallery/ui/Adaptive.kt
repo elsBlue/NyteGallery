@@ -1,5 +1,6 @@
 package com.nytefall.nytegallery.ui
 
+import androidx.compose.foundation.layout.systemBarsIgnoringVisibility
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.runtime.Composable
