@@ -9,6 +9,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.nytefall.nytegallery.data.OnboardingPrefs
@@ -38,6 +41,7 @@ class MainActivity : FragmentActivity() {
                 android.graphics.Color.TRANSPARENT,
             ),
         )
+        hideStatusBar()
         setContent {
             CompositionLocalProvider(LocalHostActivity provides this) {
                 SAOGalleryTheme {
@@ -72,5 +76,18 @@ class MainActivity : FragmentActivity() {
                 }
             }
         }
+    }
+
+    // Status bar stays hidden; a swipe from the top shows it briefly, then it hides again.
+    private fun hideStatusBar() {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.statusBars())
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Dialogs and system screens can bring the bar back; hide it again on return.
+        if (hasFocus) hideStatusBar()
     }
 }

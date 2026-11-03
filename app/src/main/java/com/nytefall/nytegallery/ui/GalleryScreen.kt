@@ -169,7 +169,7 @@ private fun widthForBand(band: Dp): Dp =
 @Composable
 private fun cardFitFor(maxWidth: Dp, maxHeight: Dp, compact: Boolean): CardFit {
     val density = LocalDensity.current
-    val insets = WindowInsets.systemBars
+    val insets = WindowInsets.stableBars
     val top = with(density) { insets.getTop(density).toDp() }
     val bottom = with(density) { insets.getBottom(density).toDp() }
     return cardFit(windowShape(), maxWidth, maxHeight, compact, top, bottom)
@@ -617,7 +617,7 @@ fun GalleryScreen(
             icon = chromeInk,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .windowInsetsPadding(WindowInsets.systemBars)
+                .windowInsetsPadding(WindowInsets.stableBars)
                 .padding(top = 12.dp, start = 12.dp),
             onClick = { confirmingLock = true },
         ) { LockGlyph() }
@@ -626,7 +626,7 @@ fun GalleryScreen(
             Row(
                 Modifier
                     .align(Alignment.TopEnd)
-                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .windowInsetsPadding(WindowInsets.stableBars)
                     .padding(top = 12.dp, end = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -652,7 +652,7 @@ fun GalleryScreen(
                 icon = chromeInk,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .windowInsetsPadding(WindowInsets.stableBars)
                     .padding(top = 12.dp, end = 12.dp),
                 onClick = { light = !light },
             ) { SunMoonIcon(light = light) }
@@ -661,7 +661,7 @@ fun GalleryScreen(
         Row(
             Modifier
                 .align(Alignment.BottomEnd)
-                .windowInsetsPadding(WindowInsets.systemBars)
+                .windowInsetsPadding(WindowInsets.stableBars)
                 .padding(bottom = 12.dp, end = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -697,7 +697,7 @@ fun GalleryScreen(
             Box(
                 Modifier
                     .align(Alignment.BottomStart)
-                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .windowInsetsPadding(WindowInsets.stableBars)
                     .padding(start = 12.dp, bottom = 12.dp)
                     .height(44.dp)
                     .shadow(8.dp, CircleShape)
@@ -716,7 +716,7 @@ fun GalleryScreen(
             (if (addAtBottom) {
                 Modifier
                     .align(Alignment.BottomCenter)
-                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .windowInsetsPadding(WindowInsets.stableBars)
                     .padding(bottom = 12.dp)
             } else {
                 Modifier.align(Alignment.Center)
@@ -1221,7 +1221,7 @@ private fun RestorePage(
             .fillMaxSize()
             .zIndex(60f)
             .background(panel)
-            .windowInsetsPadding(WindowInsets.systemBars)
+            .windowInsetsPadding(WindowInsets.stableBars)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
     ) {
         Row(
@@ -1362,7 +1362,7 @@ private fun Stage(
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .windowInsetsPadding(WindowInsets.systemBars)
+                .windowInsetsPadding(WindowInsets.stableBars)
                 .padding(top = 18.dp),
         )
         val shape = windowShape()
@@ -1372,7 +1372,7 @@ private fun Stage(
                 Modifier
                     .align(Alignment.CenterEnd)
                     .fillMaxWidth(1f - LandscapeStageShare)
-                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .windowInsetsPadding(WindowInsets.stableBars)
                     .padding(start = 8.dp, end = 24.dp, top = 64.dp, bottom = 64.dp),
                 horizontalAlignment = Alignment.Start,
             ) {
@@ -1390,7 +1390,7 @@ private fun Stage(
                     .align(Alignment.BottomCenter)
                     .then(
                         if (shape == WindowShape.Landscape) {
-                            Modifier.windowInsetsPadding(WindowInsets.systemBars).padding(bottom = 60.dp, start = 24.dp, end = 24.dp)
+                            Modifier.windowInsetsPadding(WindowInsets.stableBars).padding(bottom = 60.dp, start = 24.dp, end = 24.dp)
                         } else {
                             Modifier.padding(bottom = if (compact) 8.dp else 78.dp, start = 56.dp, end = 56.dp)
                         },
@@ -1711,13 +1711,13 @@ private fun FullView(photo: GalleryPhoto, onClose: () -> Unit) {
             letterSpacing = 0.4.sp,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .windowInsetsPadding(WindowInsets.systemBars)
+                .windowInsetsPadding(WindowInsets.stableBars)
                 .padding(top = 16.dp),
         )
         Box(
             Modifier
                 .align(Alignment.TopEnd)
-                .windowInsetsPadding(WindowInsets.systemBars)
+                .windowInsetsPadding(WindowInsets.stableBars)
                 .padding(top = 8.dp, end = 12.dp)
                 .size(40.dp)
                 .clip(CircleShape)
@@ -1857,7 +1857,7 @@ private fun PhotoGrid(
     Column(
         modifier
             .background(if (light) Color(0xFFF7F4EF) else Color(0xFF0C0D11))
-            .then(if (inset) Modifier.windowInsetsPadding(WindowInsets.systemBars) else Modifier),
+            .then(if (inset) Modifier.windowInsetsPadding(WindowInsets.stableBars) else Modifier),
     ) {
         LazyVerticalGrid(
             columns = vaultGridColumns(),
@@ -1923,7 +1923,7 @@ private fun TrashGrid(
         Modifier
             .fillMaxSize()
             .background(if (light) Color(0xFFF7F4EF) else Color(0xFF0C0D11))
-            .windowInsetsPadding(WindowInsets.systemBars)
+            .windowInsetsPadding(WindowInsets.stableBars)
             .padding(top = 56.dp, bottom = 64.dp),
     ) {
         Row(
@@ -1987,7 +1987,7 @@ private fun TrashGrid(
         visible = restoredCount > 0,
         modifier = Modifier
             .align(Alignment.BottomCenter)
-            .windowInsetsPadding(WindowInsets.systemBars)
+            .windowInsetsPadding(WindowInsets.stableBars)
             .padding(bottom = 68.dp),
         enter = androidx.compose.animation.fadeIn() +
             androidx.compose.animation.slideInVertically(initialOffsetY = { it / 2 }),
@@ -2048,7 +2048,7 @@ private fun RemoveOriginalsOverlay(
     ) {
         Column(
             Modifier
-                .windowInsetsPadding(WindowInsets.systemBars)
+                .windowInsetsPadding(WindowInsets.stableBars)
                 .padding(horizontal = 28.dp, vertical = 12.dp)
                 .wideCap()
                 .fillMaxWidth()

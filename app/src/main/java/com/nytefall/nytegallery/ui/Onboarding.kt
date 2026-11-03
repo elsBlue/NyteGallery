@@ -106,7 +106,7 @@ internal fun WelcomePages(
             .fillMaxSize()
             .background(panel)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-            .windowInsetsPadding(WindowInsets.systemBars),
+            .windowInsetsPadding(WindowInsets.stableBars),
         contentAlignment = Alignment.TopCenter,
     ) {
         Column(Modifier.fillMaxSize().wideCap()) {

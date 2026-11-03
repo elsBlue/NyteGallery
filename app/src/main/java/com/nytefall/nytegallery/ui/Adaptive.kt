@@ -26,3 +26,14 @@ internal fun vaultGridColumns(): GridCells =
 @Composable
 internal fun Modifier.wideCap(): Modifier =
     if (windowShape() == WindowShape.Phone) this else this.widthIn(max = 520.dp)
+
+
+/**
+ * System bar space that stays the same whether the status bar is hidden or shown,
+ * so hiding it (immersive mode) never moves the layout.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+internal val androidx.compose.foundation.layout.WindowInsets.Companion.stableBars: androidx.compose.foundation.layout.WindowInsets
+    @androidx.compose.runtime.Composable
+    @androidx.compose.runtime.NonRestartableComposable
+    get() = androidx.compose.foundation.layout.WindowInsets.systemBarsIgnoringVisibility

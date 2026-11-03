@@ -96,7 +96,7 @@ fun SettingsPage(
                 .align(Alignment.TopCenter)
                 .wideCap()
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.systemBars)
+                .windowInsetsPadding(WindowInsets.stableBars)
                 .padding(horizontal = 22.dp),
         ) {
             Row(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -199,7 +199,7 @@ fun AboutPage(light: Boolean, onClose: () -> Unit) {
                 .align(Alignment.TopCenter)
                 .wideCap()
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.systemBars)
+                .windowInsetsPadding(WindowInsets.stableBars)
                 .padding(horizontal = 22.dp),
         ) {
             Row(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {

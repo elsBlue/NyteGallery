@@ -81,7 +81,7 @@ fun MenuSidebar(
                 .fillMaxHeight()
                 .width(292.dp)
                 .background(panel)
-                .windowInsetsPadding(WindowInsets.systemBars)
+                .windowInsetsPadding(WindowInsets.stableBars)
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
                 .padding(horizontal = 22.dp, vertical = 22.dp),
         ) {
@@ -147,7 +147,7 @@ fun BackupPage(
     val short = password.isNotEmpty() && password.length < 8
     val ready = password.length >= 8 && password == confirm && understood && !busy
     Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.systemBars).padding(horizontal = 22.dp)) {
+        Column(Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.stableBars).padding(horizontal = 22.dp)) {
             Row(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Backup", color = ink, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Text("Close", color = ink.copy(alpha = 0.7f), modifier = Modifier.clickable(enabled = !busy, onClick = onClose).padding(8.dp))
@@ -282,7 +282,7 @@ fun BackupSavedPage(
     val ink = if (light) Color(0xFF2A2428) else Color.White
     val panel = if (light) Color(0xFFF7F4EF) else Color(0xFF12141A)
     val card = if (light) Color.White else Color(0xFF1C1E26)
-    Column(Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.systemBars).padding(horizontal = 22.dp)) {
+    Column(Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.stableBars).padding(horizontal = 22.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Backup saved", color = ink, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         }
@@ -358,7 +358,7 @@ fun RestoreBackupPage(
     val field = if (light) Color.White else Color(0xFF1C1E26)
     var password by remember { mutableStateOf("") }
     val ready = password.isNotEmpty() && !busy
-    Column(Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.systemBars).padding(horizontal = 22.dp)) {
+    Column(Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.stableBars).padding(horizontal = 22.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Restore backup", color = ink, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             Text("Close", color = ink.copy(alpha = 0.7f), modifier = Modifier.clickable(enabled = !busy, onClick = onClose).padding(8.dp))

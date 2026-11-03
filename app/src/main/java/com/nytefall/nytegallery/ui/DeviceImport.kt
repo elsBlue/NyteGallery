@@ -143,7 +143,7 @@ fun DeviceImportPage(
     } else {
         photos
     }
-    Column(Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.systemBars)) {
+    Column(Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.stableBars)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,

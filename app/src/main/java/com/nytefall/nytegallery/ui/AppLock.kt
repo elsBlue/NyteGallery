@@ -201,7 +201,7 @@ fun LockSetupPage(
         Modifier
             .fillMaxSize()
             .background(panel)
-            .windowInsetsPadding(WindowInsets.systemBars)
+            .windowInsetsPadding(WindowInsets.stableBars)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 18.dp),
     ) {
@@ -312,7 +312,7 @@ fun LockGate(
     val canRecover = remember { store.hasRecoveryCode() }
     val tries = rememberLockTries(store)
     BoxWithConstraints(
-        Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.systemBars),
+        Modifier.fillMaxSize().background(panel).windowInsetsPadding(WindowInsets.stableBars),
     ) {
         Column(
             Modifier
@@ -771,7 +771,7 @@ fun RecoveryCodeSettingsPage(
                 Modifier
                     .fillMaxSize()
                     .background(panel)
-                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .windowInsetsPadding(WindowInsets.stableBars)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 18.dp),
             ) {
@@ -814,7 +814,7 @@ fun RecoveryCodePage(light: Boolean, code: String?, note: String?, onDone: () ->
             .fillMaxSize()
             .background(panel)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-            .windowInsetsPadding(WindowInsets.systemBars)
+            .windowInsetsPadding(WindowInsets.stableBars)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 18.dp),
     ) {
@@ -933,7 +933,7 @@ private fun CurrentLockCheck(
         Modifier
             .fillMaxSize()
             .background(panel)
-            .windowInsetsPadding(WindowInsets.systemBars)
+            .windowInsetsPadding(WindowInsets.stableBars)
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 18.dp),
     ) {
