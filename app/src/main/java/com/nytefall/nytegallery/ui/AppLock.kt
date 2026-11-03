@@ -352,7 +352,7 @@ fun LockGate(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(if (on) LockPink else field)
-                            .clickable { method = item; value = ""; error = "" }
+                            .clickable { method = item; value = ""; error = ""; tries.failure = "" }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
@@ -365,6 +365,10 @@ fun LockGate(
                 Spacer(Modifier.height(14.dp))
                 LockButton(if (tries.checking) "Checking..." else "Unlock", LockPink, Color.White, Modifier.fillMaxWidth()) {
                     val typed = value
+                    if (store.recoveryInputEmpty(typed)) {
+                        error = "Enter your recovery code"
+                        return@LockButton
+                    }
                     tries.attempt({ store.checkRecovery(typed) }) { result ->
                         when (result) {
                             LockCheck.Ok -> onRecovered()
@@ -373,7 +377,7 @@ fun LockGate(
                         }
                     }
                 }
-                Text("Use another way", color = ink, modifier = Modifier.padding(top = 14.dp).clickable { emailMode = false; value = ""; error = "" })
+                Text("Use another way", color = ink, modifier = Modifier.padding(top = 14.dp).clickable { emailMode = false; value = ""; error = ""; tries.failure = "" })
             }
             method == LockStore.FINGER -> {
                 LockButton("Use fingerprint", LockPink, Color.White, Modifier.fillMaxWidth()) {
@@ -402,6 +406,10 @@ fun LockGate(
                 LockButton(if (tries.checking) "Checking..." else "Unlock", LockPink, Color.White, Modifier.fillMaxWidth()) {
                     val way = method
                     val typed = value
+                    if (typed.isBlank()) {
+                        error = emptyInputMessage(way)
+                        return@LockButton
+                    }
                     tries.attempt({ store.check(way, typed) }) { result ->
                         when (result) {
                             LockCheck.Ok -> onUnlocked()
@@ -412,7 +420,7 @@ fun LockGate(
                 }
             }
         }
-        val shown = if (tries.waitMs > 0L) waitMessage(tries.waitMs) else error
+        val shown = if (tries.waitMs > 0L) waitMessage(tries.waitMs) else tries.failure.ifEmpty { error }
         if (shown.isNotEmpty()) Text(shown, color = LockPink, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
         if (!emailMode && canRecover) {
             Spacer(Modifier.height(18.dp))
@@ -424,6 +432,7 @@ fun LockGate(
                     emailMode = true
                     value = ""
                     error = ""
+                    tries.failure = ""
                 },
             )
         }
@@ -956,7 +965,7 @@ private fun CurrentLockCheck(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(if (on) LockPink else field)
-                            .clickable { method = item; value = ""; error = "" }
+                            .clickable { method = item; value = ""; error = ""; tries.failure = "" }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
@@ -992,6 +1001,10 @@ private fun CurrentLockCheck(
                 Spacer(Modifier.height(14.dp))
                 LockButton(if (tries.checking) "Checking..." else "Continue", LockPink, Color.White, Modifier.fillMaxWidth()) {
                     val typed = value
+                    if (typed.isBlank()) {
+                        error = emptyInputMessage(current)
+                        return@LockButton
+                    }
                     tries.attempt({ store.check(current, typed) }) { result ->
                         when (result) {
                             LockCheck.Ok -> onVerified()
@@ -1002,7 +1015,7 @@ private fun CurrentLockCheck(
                 }
             }
         }
-        val shown = if (tries.waitMs > 0L) waitMessage(tries.waitMs) else error
+        val shown = if (tries.waitMs > 0L) waitMessage(tries.waitMs) else tries.failure.ifEmpty { error }
         if (shown.isNotEmpty()) Text(shown, color = LockPink, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
     }
 }
@@ -1015,14 +1028,26 @@ private class LockTries(private val store: LockStore, private val scope: Corouti
     var checking by mutableStateOf(false)
     var waitMs by mutableLongStateOf(store.waitRemainingMs())
 
+    /** Shown instead of crashing when a check throws. Cleared by the next try. */
+    var failure by mutableStateOf("")
+
     fun attempt(run: () -> LockCheck, onResult: (LockCheck) -> Unit) {
         if (checking || waitMs > 0L) return
         checking = true
+        failure = ""
         scope.launch {
             val result = try {
                 withContext(Dispatchers.Default) { run() }
+            } catch (cancel: kotlin.coroutines.cancellation.CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                null
             } finally {
                 checking = false
+            }
+            if (result == null) {
+                failure = "Couldn't check that. Please try again."
+                return@launch
             }
             when (result) {
                 is LockCheck.Wrong -> if (result.waitMs > 0L) waitMs = result.waitMs
@@ -1047,6 +1072,13 @@ private fun rememberLockTries(store: LockStore): LockTries {
         }
     }
     return tries
+}
+
+/** Inline message when Unlock or Continue is tapped with nothing typed. */
+private fun emptyInputMessage(method: String): String = when (method) {
+    LockStore.PIN -> "Enter your PIN"
+    LockStore.PASSWORD -> "Enter your password"
+    else -> "Enter your ${method.replaceFirstChar { it.uppercase() }}"
 }
 
 private fun waitMessage(ms: Long): String {

@@ -89,7 +89,12 @@ class LockStore(context: Context) {
      * during the check does not skip it. A match clears the counter.
      */
     @Synchronized
-    fun check(method: String, value: String): LockCheck = guarded { matches(method, value) }
+    fun check(method: String, value: String): LockCheck {
+        // Setup trims the password, so unlock trims it too. An empty value is never counted or hashed.
+        val typed = if (method == PASSWORD) value.trim() else value
+        if (typed.isEmpty()) return notChecked()
+        return guarded { matches(method, typed) }
+    }
 
     /**
      * Checks a recovery code (case and dashes/spaces ignored), sharing the same wrong-try counter.
@@ -97,9 +102,22 @@ class LockStore(context: Context) {
      * The old code stays valid until then, so closing the app halfway can never lock the user out.
      */
     @Synchronized
-    fun checkRecovery(code: String): LockCheck = guarded {
-        val saved = prefs.getString(RECOVERY, null)
-        saved != null && verifySlow(saved, normalizeRecovery(code))
+    fun checkRecovery(code: String): LockCheck {
+        val typed = normalizeRecovery(code)
+        if (typed.isEmpty()) return notChecked()
+        return guarded {
+            val saved = prefs.getString(RECOVERY, null)
+            saved != null && verifySlow(saved, typed)
+        }
+    }
+
+    /** True when [code] has no letters or digits (empty, or only dashes and spaces). */
+    fun recoveryInputEmpty(code: String): Boolean = normalizeRecovery(code).isEmpty()
+
+    // Empty input: not counted as a try. A running cooldown is still reported.
+    private fun notChecked(): LockCheck {
+        val left = waitRemainingMs()
+        return if (left > 0L) LockCheck.Wait(left) else LockCheck.Wrong(0L)
     }
 
     /** True while an old email recovery address is still stored (installs from before recovery codes). */
@@ -217,6 +235,8 @@ class LockStore(context: Context) {
     }
 
     private fun verifySlow(saved: String, value: String): Boolean {
+        // PBKDF2 on Android (BouncyCastle) throws on an empty password; an empty value never matches.
+        if (value.isEmpty()) return false
         val parts = saved.split('$')
         if (parts.size != 4) return false
         val iterations = parts[1].toIntOrNull() ?: return false
