@@ -21,6 +21,9 @@ Code: `data/LockStore.kt` (storage, hashing, cooldown) and `ui/AppLock.kt` (scre
   - **Leaving the app (`ON_STOP`):** the app locks once it has been away for **3 s** (`AutoLock.GRACE_MS`). A timer
     locks it while it's in the background, and `ON_START` checks again. Coming back within 3 s doesn't lock, which
     avoids flicker. A configuration-change stop is ignored.
+  - **While a new recovery code is on screen** (`RecoveryCodePage`), the time away is **60 s**
+    (`AutoLock.RECOVERY_GRACE_MS`) instead of 3 s, so the code can be copied into a notes app and the user can come
+    back. The grace is read when the app leaves the foreground. Screen off still locks at once.
   - **Screen off (`ACTION_SCREEN_OFF`, registered at runtime):** locks at once.
   - **Exception:** stopping within 5 s of the app opening a system screen it waits on doesn't lock. These are
     marked with `AutoLock.expectExternal()`: permission requests, the delete consent, the SAF create/open document
@@ -63,6 +66,7 @@ SharedPreferences file `nyte_lock` (app-private, excluded from backup):
 | `password`, `pin`, `pattern` | string | Hash of each secret (see 4.4) |
 | `recovery` | string | PBKDF2 hash of the recovery code |
 | `recovery_saved` | bool | The user ticked "I have written down my recovery code" |
+| `recovery_pending` | string | The unconfirmed recovery code, AES-256-GCM encrypted with the non-exportable Keystore key `nyte_recovery_pending`, stored as `<iv base64>:<ciphertext base64>`. Deleted on Continue, or by `clear()`. |
 | `fails` | int | Wrong tries in a row, shared by all methods and the recovery code |
 | `wait_ms` | long | Length of the current cooldown |
 | `wait_until_elapsed`, `wait_start_elapsed` | long | Cooldown end and start on the `elapsedRealtime` clock |
@@ -93,7 +97,16 @@ PBKDF2 format. Nobody is locked out by the upgrade. Each secret upgrades separat
 
 ## 4.5 Wrong tries and cooldown
 
-`check()` and `checkRecovery()` go through `guarded()`:
+**Empty input is never checked or counted.** Tapping Unlock or Continue with nothing typed shows "Enter your PIN",
+"Enter your password" or "Enter your recovery code" (a recovery code of only dashes or spaces counts as empty). As a
+backstop, `check()` and `checkRecovery()` return `Wrong(0)` for an empty value (or `Wait` if a cooldown runs) without
+saving a try or running PBKDF2. Background: PBKDF2 on Android (BouncyCastle) throws `IllegalArgumentException:
+password empty`, which used to crash the app. `LockTries.attempt` also catches any exception from a check and shows
+"Couldn't check that. Please try again." instead of crashing.
+
+**Passwords are trimmed** at setup and at unlock, so leading or trailing spaces never matter.
+
+Otherwise `check()` and `checkRecovery()` go through `guarded()`:
 
 1. If a cooldown is running, the call returns `Wait(remaining)` **without checking** the value.
 2. Otherwise `fails + 1` is **saved first** (with `commit()`), and any cooldown due for that count is armed. Killing
@@ -131,12 +144,15 @@ PBKDF2 format. Nobody is locked out by the upgrade. Each secret upgrades separat
 | Alphabet | `ABCDEFGHJKMNPQRSTUVWXYZ23456789`: 31 symbols, without 0/O and 1/I/L |
 | Length | 16 characters, from `SecureRandom`, about 79 bits |
 | Display format | `XXXX-XXXX-XXXX-XXXX` |
-| Storage | PBKDF2 hash only (same format as 4.4). The plain code is never stored. |
+| Storage | PBKDF2 hash (same format as 4.4). Until it's confirmed, the plain code is also kept encrypted with a Keystore AES-GCM key (`recovery_pending`), so it can be shown again. After Continue only the hash is left. |
 | Check | Input is uppercased and stripped to letters and digits, so case, dashes and spaces don't matter. The input field allows up to 24 characters. |
 | Wrong tries | Shares the counter and cooldown described above |
 
-**Creating a code** (`newRecoveryCode`) replaces any old code, sets `recovery_saved = false` and deletes the
-legacy `email`, `code` and `code_at` keys.
+**Creating a code** (`newRecoveryCode`) replaces any old code, sets `recovery_saved = false`, stores the encrypted
+pending copy (if the Keystore fails, no copy is kept) and deletes the legacy `email`, `code` and `code_at` keys.
+
+**`pendingRecoveryCode()`** decrypts the pending copy and returns it only if it still matches the saved hash. If it
+can't be decrypted or doesn't match, the copy is deleted and null is returned.
 
 **`RecoveryCodePage`** shows the code once:
 - It shows `RECOVERY_WARNING`: "Write this code down and keep it somewhere safe. It is the ONLY way back in if you
@@ -146,7 +162,10 @@ legacy `email`, `code` and `code_at` keys.
   preview it. After 60 s the clipboard is cleared if it still holds the code (best effort, since Android 10+ may
   block clipboard reads from the background).
 - **Continue** works only after ticking "I have written down my recovery code". It then calls
-  `markRecoverySaved()`. The page has **no Close** button, and Back is blocked while it's open.
+  `markRecoverySaved()`, which also deletes the pending copy. The page has **no Close** button, and Back is blocked
+  while it's open.
+- If the app locks while the page is open, the page is hidden behind the lock screen and comes back with the same code
+  after unlocking.
 
 **When a code is shown:**
 1. Right after the first lock setup. After Continue, the app locks itself.
@@ -157,8 +176,12 @@ legacy `email`, `code` and `code_at` keys.
    it was never confirmed:
    - **Old email-recovery installs** (`email` key present) see: "Nyte Gallery no longer uses email to recover your
      lock. It now uses a recovery code that never leaves this phone. Your old recovery email has been removed."
-   - **An unconfirmed code** (for example the app was killed on the code page) gives: "Your recovery code was not
-     confirmed, so here is a new one. The old one no longer works."
+   - **An unconfirmed code with a pending copy** (for example the app was killed or crashed on the code page) shows
+     the **same** code again with the note "Not confirmed yet. This is the same code as before."
+   - **An unconfirmed code without a pending copy** (Keystore failure, or an install from before this change) gets a
+     new code: "Your recovery code was not confirmed, so here is a new one. The old one no longer works."
+   - Settings, Recovery code and the recovery-code unlock still create a **new** code on purpose, which replaces any
+     pending one.
 
 **Using the code:** on the lock screen, "Forgot? Use recovery code" appears only if a code exists. A correct code
 calls `onRecovered`. The app unlocks and opens **NEW LOCK** (`LockSetupPage`): "You used your recovery code. Choose
@@ -191,21 +214,34 @@ flowchart TD
     Open --> LockBtn[User taps lock button and confirms] --> Gate
 ```
 
-## 4.8 Change lock and turn off
+## 4.8 Manage lock and turn off
 
 From Settings, Security:
 
 - When the lock is **off**: "App lock: Off · Tap to set up a lock" opens the same confirm and setup path as the lock
   button. "Recovery code: Created when you set up the lock" also starts setup.
-- **Change lock** (`LockChangePage`):
-  1. `CurrentLockCheck`: confirm with one current method. The recovery code isn't offered here, and the same
-     wrong-try counter applies.
-  2. `LockSetupPage` "CHANGE LOCK": choose 2 or more new methods, which **replace** the old ones. **The recovery
-     code stays the same.** Toast: "Lock updated".
-  3. "Turn off app lock" leads to the confirm dialog **TURN OFF LOCK**: "Turn off the app lock? Anyone with this phone
-     can open Nyte Gallery until you set a lock again. Your photos stay encrypted." Confirming runs
-     `LockStore.clear()`, which deletes **all** lock prefs, including the recovery code and the try counter. Toast:
-     "App lock is off".
+- **Manage lock: "On · Add, change or remove ways to unlock"** (`ManageLockPage`):
+  1. `CurrentLockCheck` "MANAGE LOCK": confirm with one current method. The recovery code isn't offered here, and the
+     same wrong-try counter applies.
+  2. One card per way (Password, PIN, Pattern, Fingerprint), each with an **On/Off** pill:
+     - **Off:** "Add". **On:** "Change" (not for fingerprint) and "Remove".
+     - Add and Change open the same input as setup for that one way, with the same rules (password 6+ characters,
+       PIN 4–6 digits, pattern 4+ dots drawn twice). Fingerprint is added after one `BIOMETRIC_STRONG` prompt. It's
+       offered only when strong biometrics are available ("Fingerprint is not available on this phone." otherwise).
+       A saved fingerprint on a phone without usable strong biometrics can still be removed.
+     - Remove asks "Remove PIN as a way to unlock Nyte Gallery?" (Cancel / Remove). When only 2 ways are on,
+       Remove is dimmed and the page shows "Keep at least 2 ways to unlock".
+     - Saving uses `LockStore.setMethod(method, value)` (PBKDF2, 210k) and `removeMethod(method)`, which refuses to go
+       below `MIN_METHODS = 2`. **Other ways and the recovery code aren't touched.**
+  3. Each change is committed on its own, so auto-lock (normal rules) can close the page without losing a saved
+     change.
+- **Turn off lock** (red row, only shown when the lock is on; `TurnOffLockPage`):
+  1. `CurrentLockCheck` "TURN OFF LOCK".
+  2. Warning **TURN OFF LOCK**: "Anyone with this phone can open Nyte Gallery. Your recovery code will stop working.
+     Photos stay encrypted." (Cancel / Turn off).
+  3. Turn off runs `LockStore.clear()`, which deletes **all** lock prefs: every way, the recovery code, any pending
+     code and the try counter. Toast: "App lock is off". Encryption doesn't change, because the vault key isn't tied
+     to the lock. Turning the lock on again gives a new recovery code.
 - **Recovery code** (`RecoveryCodeSettingsPage`): check the current lock, then "Create new recovery code".
 
 ## 4.9 FLAG_SECURE, screenshots and Recents

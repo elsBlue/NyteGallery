@@ -65,12 +65,12 @@ All Kotlin sources are under `app/src/main/java/com/nytefall/nytegallery/`. Line
 | `data/GalleryRepository.kt` | 14 | The 6 bundled sample photos (`valley`, `japan`, `cyber`, `sea`, `cat`, `lantern`). |
 | `data/VaultStore.kt` | 555 | Encrypted storage: `index.json`, `.nyt` photo files, encrypted thumbnails, Keystore key, decode/sampling, trash purge, `ThumbMemory` LRU cache, `ThumbGate` per-file locks. |
 | `data/VaultBackup.kt` | 301 | `NYTEBAK1` backup format: writer, streaming reader, verify, and a hand-written PBKDF2-HMAC-SHA256. |
-| `data/LockStore.kt` | 301 | App-lock settings: method set, PBKDF2 hashes, wrong-try cooldown, recovery code, migrations. |
+| `data/LockStore.kt` | 301 | App-lock settings: method set, PBKDF2 hashes, add or remove one way, wrong-try cooldown, recovery code (plus the encrypted unconfirmed copy), migrations. |
 | `data/BackupPrefs.kt` | 29 | `guide_seen`, `last_backup_at`, `last_backup_photos`. |
 | `ui/GalleryViewModel.kt` | 757 | All state and long-running work: carousel rotation, rename, trash, import, removal of originals, export, backup write/verify/read, transfer progress. |
 | `ui/GalleryScreen.kt` | 2427 | The main composable: stage (carousel), grid, trash grid, full view, every overlay, back handling, permission and SAF launchers, toasts. |
-| `ui/AppLock.kt` | 1048 | `LockGate`, `LockSetupPage`, `LockChangePage`, `RecoveryCodeSettingsPage`, `RecoveryCodePage`, pattern pad, `LockConfirm`, `LockTries`, strong-only biometric helpers. |
-| `ui/AutoLock.kt` | ~110 | `AutoLock` (external-screen marker, 3 s grace) and `AutoLockEffect` (lock on `ON_STOP` after the grace, and on screen off). |
+| `ui/AppLock.kt` | 1048 | `LockGate`, `LockSetupPage`, `ManageLockPage`, `TurnOffLockPage`, `RecoveryCodeSettingsPage`, `RecoveryCodePage`, pattern pad, `LockConfirm`, `LockTries`, strong-only biometric helpers. |
+| `ui/AutoLock.kt` | ~110 | `AutoLock` (external-screen marker, 3 s grace, 60 s while a recovery code is shown) and `AutoLockEffect` (lock on `ON_STOP` after the grace, and on screen off). |
 | `ui/DeviceImport.kt` | 363 | Runtime permission list per Android version, MediaStore query, the "Move into Nyte" picker (All / Folder). |
 | `ui/VaultMenu.kt` | 519 | Side menu, Backup page and first-time guide, "Backup saved" page, Restore backup page. |
 | `ui/SettingsAbout.kt` | 395 | Settings page (Recycle bin, Clear cache, lock, recovery code, backup), About page, feedback mail and policy links. |
