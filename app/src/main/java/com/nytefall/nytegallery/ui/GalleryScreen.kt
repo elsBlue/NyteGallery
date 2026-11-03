@@ -132,7 +132,8 @@ private const val CARD_LIMIT = 16
 private const val LABEL_LIMIT = 22
 // false: FLAG_SECURE is on for the whole app (also the lock screen), which blocks screenshots and screen
 // recording and hides the app's preview in Recent apps. Also applied in MainActivity.onCreate before the first frame.
-internal const val SCREENSHOTS_ALLOWED = false
+// Comes from BuildConfig: false in debug and release, true only in the separate "screenshot" build type.
+internal val SCREENSHOTS_ALLOWED: Boolean = com.nytefall.nytegallery.BuildConfig.SCREENSHOTS_ALLOWED
 private val CardHeader = 34.dp
 
 // Landscape (list closed): cards live in the left share of the width, the info panel in the rest.

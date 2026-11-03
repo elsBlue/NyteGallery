@@ -39,3 +39,13 @@ jobs:
           name: nytegallery-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Build screenshot APK (screenshots allowed, separate app)
+        run: ./gradlew assembleScreenshot --stacktrace --no-daemon
+
+      - name: Upload screenshot APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nyte-gallery-screenshots-apk
+          path: app/build/outputs/apk/screenshot/*.apk
+          if-no-files-found: error

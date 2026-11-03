@@ -195,12 +195,13 @@ From Settings, Security:
 
 ## 4.9 FLAG_SECURE, screenshots and Recents
 
-- `SCREENSHOTS_ALLOWED` is an `internal const val` in `ui/GalleryScreen.kt`, currently **`false`**. `MainActivity`
+- `SCREENSHOTS_ALLOWED` is an `internal val` in `ui/GalleryScreen.kt`, read from `BuildConfig.SCREENSHOTS_ALLOWED`.
+  It's **`false`** in debug and release, and `true` only in the separate `screenshot` build type. `MainActivity`
   reads it before `setContent`, so the very first frame is already protected. A `DisposableEffect` in `GalleryScreen`
   adds or clears the flag again.
 - With `FLAG_SECURE` on, for the whole app including the lock screen:
   - screenshots and screen recordings show black or are refused;
   - the app's preview in **Recent apps** is blank;
   - casting or mirroring the screen to non-secure displays shows black.
-- To allow screenshots for development or marketing, set `SCREENSHOTS_ALLOWED = true`. **Keep it `false` for
-  release.**
+- For Play Store screenshots, use the `screenshot` build type (CI artifact `nyte-gallery-screenshots-apk`; see
+  [Build §8.2](08-build-release.md#screenshot-build-play-store-listing-screenshots)). Don't change the default.

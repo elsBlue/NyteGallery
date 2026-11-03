@@ -143,7 +143,7 @@ _transfer: MutableStateFlow<TransferProgress?> ──► transfer (shown as Tran
 
 ## 2.5 MainActivity
 
-1. If `!SCREENSHOTS_ALLOWED` (a `private const val` in `MainActivity.kt`, currently **`false`**), it calls
+1. If `!SCREENSHOTS_ALLOWED` (in `ui/GalleryScreen.kt`, read from `BuildConfig.SCREENSHOTS_ALLOWED`: **`false`** except in the `screenshot` build type), it calls
    `window.setFlags(FLAG_SECURE, FLAG_SECURE)` before `setContent`.
 2. It calls `enableEdgeToEdge()` with transparent status and navigation bars.
 3. It provides `LocalHostActivity` (a `FragmentActivity`), which `BiometricPrompt` and the intent-sender launchers

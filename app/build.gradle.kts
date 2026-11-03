@@ -14,9 +14,19 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        // FLAG_SECURE stays on (screenshots blocked) in every build except the "screenshot" build type below.
+        buildConfigField("boolean", "SCREENSHOTS_ALLOWED", "false")
     }
 
     buildTypes {
+        // For Play Store listing screenshots only: a separate app ("Nyte Gallery (screenshots)",
+        // com.nytefall.nytegallery.shots) with its own empty vault and screenshots allowed. Debug-signed.
+        create("screenshot") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".shots"
+            matchingFallbacks += listOf("debug")
+            buildConfigField("boolean", "SCREENSHOTS_ALLOWED", "true")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

@@ -33,6 +33,8 @@ Workflow `.github/workflows/android-build.yml`, named **"Android Build"**:
   6. `./gradlew assembleDebug --stacktrace --no-daemon`
   7. Upload the artifact **`nytegallery-debug-apk`** from `app/build/outputs/apk/debug/*.apk`, failing if it's
      missing
+  8. `./gradlew assembleScreenshot --stacktrace --no-daemon`
+  9. Upload the artifact **`nyte-gallery-screenshots-apk`** from `app/build/outputs/apk/screenshot/*.apk`
 - There are no tests, lint or release steps in CI. The repo has no unit or instrumented tests.
 
 Getting a build:
@@ -41,6 +43,27 @@ Getting a build:
 2. `gh run list --limit 5`, then `gh run watch <id> --exit-status`.
 3. Download the APK from the run's **Artifacts** section (`nytegallery-debug-apk`, a zip containing
    `app-debug.apk`).
+
+### Screenshot build (Play Store listing screenshots)
+
+`SCREENSHOTS_ALLOWED` comes from `BuildConfig.SCREENSHOTS_ALLOWED`:
+
+| Build type | Value | Notes |
+|---|---|---|
+| `debug` | `false` | Uses the `defaultConfig` default, so `FLAG_SECURE` is on. |
+| `release` | `false` | Same default. Keep it that way. |
+| `screenshot` | `true` | Screenshots allowed. |
+
+The `screenshot` build type:
+- Is built with `initWith(debug)`, so it's debuggable and debug-signed.
+- Uses `applicationIdSuffix = ".shots"`, so it installs as **`com.nytefall.nytegallery.shots`**.
+- Has the launcher label **"Nyte Gallery (screenshots)"** from `app/src/screenshot/res/values/strings.xml`. The
+  in-app texts stay "Nyte Gallery".
+- Is a separate app next to the real one, with its own empty vault, lock, prefs and Keystore key. Fill it with
+  demo photos for the screenshots. It never sees the real vault.
+
+Nothing at runtime depends on the package name: there's no FileProvider, and no hard-coded authority or package
+string. Exports from it still go to `Pictures/Nyte Gallery`.
 
 ## 8.3 Signing
 
