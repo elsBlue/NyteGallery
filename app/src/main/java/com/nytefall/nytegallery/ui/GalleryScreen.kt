@@ -1517,7 +1517,7 @@ private fun PortraitWindow(
     light: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val headerColor = if (light) Paper else Color(0xFF0B0B0C)
+    val headerColor = if (light) Paper else Color(0xFF262A35)
     val headerInk = if (light) Ink else Color.White
     val nameAlpha = if (light) 0.72f else 0.96f
     val yearAlpha = if (light) 0.55f else 0.82f
