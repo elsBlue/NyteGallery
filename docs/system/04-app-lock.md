@@ -16,9 +16,21 @@ Code: `data/LockStore.kt` (storage, hashing, cooldown) and `ui/AppLock.kt` (scre
   - on start, `locked` starts as `lockStore.configured()`, so every new process (cold start) begins locked;
   - when the user taps the lock button (top-left) and confirms "Lock Nyte Gallery now?";
   - right after a new lock is set up, once the user has confirmed the new recovery code.
-- **There is no auto-lock on background or after a timeout.** Nothing in the code listens for
-  `ON_STOP`/`ON_PAUSE`. The activity isn't recreated on rotation (`configChanges`). Once unlocked, the app stays
-  unlocked until it's locked by hand or its process dies. See [Limitations](09-limitations-todo.md).
+- **Auto-lock** (`ui/AutoLock.kt`, `AutoLockEffect` in `GalleryScreen`). It applies only when a lock is set, the
+  app isn't already locked, and no recovery reset is in progress:
+  - **Leaving the app (`ON_STOP`):** the app locks once it has been away for **3 s** (`AutoLock.GRACE_MS`). A timer
+    locks it while it's in the background, and `ON_START` checks again. Coming back within 3 s doesn't lock, which
+    avoids flicker. A configuration-change stop is ignored.
+  - **Screen off (`ACTION_SCREEN_OFF`, registered at runtime):** locks at once.
+  - **Exception:** stopping within 5 s of the app opening a system screen it waits on doesn't lock. These are
+    marked with `AutoLock.expectExternal()`: permission requests, the delete consent, the SAF create/open document
+    pickers, the fingerprint prompt, and the feedback email and policy links. The mark is cleared on the next
+    `ON_START`. If the screen turns off while the user is in such a screen (after those 5 s), the app still
+    locks.
+  - Locking only sets `locked = true`, so the lock screen is drawn over everything. A running import, export or
+    backup (`TransferService`) carries on, and its results arrive behind the lock. The in-app photo picker is part
+    of the app, so leaving from it counts as leaving the app.
+  - There's no setting for it.
 
 ## 4.2 Unlock methods and the "2 or more" rule
 
@@ -27,12 +39,15 @@ Code: `data/LockStore.kt` (storage, hashing, cooldown) and `ui/AppLock.kt` (scre
 | Password | 6 or more characters, typed twice | PBKDF2 hash compare |
 | PIN | 4–6 digits (`\d{4,6}`), typed twice; the field accepts digits only, up to 6 | PBKDF2 hash compare |
 | Pattern | 3×3 pad, at least 4 dots, drawn twice to confirm. Stored as the dot indices joined with `-` (for example `0-1-2-5`) | PBKDF2 hash compare |
-| Fingerprint | Shown only if `BiometricManager` reports `BIOMETRIC_WEAK` or `BIOMETRIC_STRONG` as available or not enrolled. Turned on after one successful `BiometricPrompt` ("Confirm fingerprint") | `BiometricPrompt` success. No `CryptoObject`. |
+| Fingerprint | Shown only if `canAuthenticate(BIOMETRIC_STRONG)` (Class 3) is available or not enrolled. Turned on after one successful `BiometricPrompt` ("Confirm fingerprint") | `BiometricPrompt` with `setAllowedAuthenticators(BIOMETRIC_STRONG)`. No `CryptoObject`. |
 
 - `LockSetupPage` shows "**N of 2 ways set**". The save button only works when **2 or more** methods are set ("Set at
   least two unlock ways"). This protects against forgetting a single secret.
-- The "fingerprint" option is checked with `BIOMETRIC_WEAK` first, so on some phones a class-2 biometric such as
-  face unlock may also pass. **(Not verified on a device; the UI always calls it "Fingerprint".)**
+- Fingerprint is **strong-only** (Class 3), so weak (Class 2) face unlock can't pass.
+- If fingerprint was saved but the phone has no usable strong biometric now (none enrolled, hardware unavailable,
+  or the device only has weak biometrics), the lock screen and "Confirm it's you" hide that method
+  (`usableMethods`). The other saved ways and the recovery code still unlock. Because of the 2-way rule there's
+  always at least one other way.
 - On the lock screen the default method is the first saved method that isn't fingerprint. The others appear as chips
   when more than one is saved. The order comes from a `StringSet` in prefs, so it isn't guaranteed.
 - Fingerprint doesn't prompt automatically. The user taps "Use fingerprint".

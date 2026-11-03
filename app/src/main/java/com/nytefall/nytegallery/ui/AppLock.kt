@@ -77,12 +77,24 @@ import kotlin.math.min
 private val LockPink = Color(0xFFFF4D6A)
 private val LockGreen = Color(0xFF2F9B68)
 
+// Only Class 3 (BIOMETRIC_STRONG) biometrics are accepted, so weak face unlock can never open the app.
+private const val STRONG_BIOMETRIC = BiometricManager.Authenticators.BIOMETRIC_STRONG
+
+/** Lock setup may offer fingerprint: the phone has strong biometric hardware (enrolled, or can be enrolled). */
 fun fingerprintAvailable(context: Context): Boolean {
-    val manager = BiometricManager.from(context)
-    val weak = manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK)
-    if (weak == BiometricManager.BIOMETRIC_SUCCESS || weak == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) return true
-    val strong = manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+    val strong = BiometricManager.from(context).canAuthenticate(STRONG_BIOMETRIC)
     return strong == BiometricManager.BIOMETRIC_SUCCESS || strong == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED
+}
+
+/** Fingerprint can be used to unlock right now (strong biometric enrolled and working). */
+fun fingerprintUsable(context: Context): Boolean =
+    BiometricManager.from(context).canAuthenticate(STRONG_BIOMETRIC) == BiometricManager.BIOMETRIC_SUCCESS
+
+/** Saved unlock ways that work on this phone now. A saved fingerprint is hidden when no strong biometric is usable. */
+internal fun usableMethods(store: LockStore, context: Context): List<String> {
+    val saved = store.methods().toList()
+    if (LockStore.FINGER !in saved || fingerprintUsable(context)) return saved
+    return saved.filter { it != LockStore.FINGER }
 }
 
 val LocalHostActivity = staticCompositionLocalOf<FragmentActivity?> { null }
@@ -98,12 +110,10 @@ private fun findActivity(context: Context): FragmentActivity? {
 }
 
 fun promptFingerprint(activity: FragmentActivity, title: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
-    val enrolled = BiometricManager.from(activity).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK)
-    if (enrolled == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) {
-        val strong = BiometricManager.from(activity).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-        if (strong == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) {
-            return onError("Add a fingerprint in system settings first")
-        }
+    when (BiometricManager.from(activity).canAuthenticate(STRONG_BIOMETRIC)) {
+        BiometricManager.BIOMETRIC_SUCCESS -> Unit
+        BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> return onError("Add a fingerprint in system settings first")
+        else -> return onError("Fingerprint isn't available on this phone right now")
     }
     try {
         val prompt = BiometricPrompt(
@@ -118,11 +128,13 @@ fun promptFingerprint(activity: FragmentActivity, title: String, onSuccess: () -
                 }
             },
         )
+        AutoLock.expectExternal()
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
                 .setTitle(title)
                 .setSubtitle("Use the fingerprint saved on this phone")
                 .setNegativeButtonText("Cancel")
+                .setAllowedAuthenticators(STRONG_BIOMETRIC)
                 .build(),
         )
     } catch (error: Exception) {
@@ -292,8 +304,8 @@ fun LockGate(
     val ink = if (light) Color(0xFF2A2428) else Color.White
     val panel = if (light) Color(0xFFF7F4EF) else Color(0xFF12141A)
     val field = if (light) Color.White else Color(0xFF1C1E26)
-    val methods = store.methods().toList()
-    var method by remember { mutableStateOf(methods.firstOrNull { it != LockStore.FINGER } ?: methods.first()) }
+    val methods = remember { usableMethods(store, context) }
+    var method by remember { mutableStateOf(methods.firstOrNull { it != LockStore.FINGER } ?: methods.firstOrNull() ?: "") }
     var value by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var emailMode by remember { mutableStateOf(false) } // true: entering the recovery code
@@ -912,7 +924,7 @@ private fun CurrentLockCheck(
     val ink = if (light) Color(0xFF2A2428) else Color.White
     val panel = if (light) Color(0xFFF7F4EF) else Color(0xFF12141A)
     val field = if (light) Color.White else Color(0xFF1C1E26)
-    val methods = remember { store.methods().toList() }
+    val methods = remember { usableMethods(store, context) }
     var method by remember { mutableStateOf(methods.firstOrNull { it != LockStore.FINGER } ?: methods.firstOrNull()) }
     var value by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }

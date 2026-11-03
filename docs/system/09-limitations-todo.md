@@ -7,9 +7,9 @@ pointer to the section that explains it. "Not verified" means it follows from th
 
 | # | Limitation | Where |
 |---|---|---|
-| S1 | **No auto-lock.** The app locks only on a cold start or a manual lock. Leaving the app in the background keeps it unlocked until the process dies. A `ProcessLifecycleOwner` or `ON_STOP` lock, maybe with a grace period, is the obvious next step. | [4.1](04-app-lock.md#41-what-the-lock-is-and-what-it-is-not) |
+| S1 | ~~No auto-lock~~ **Fixed:** the app locks 3 s after leaving the foreground and at once on screen off (see 4.1). What's left: while the user is inside a system screen the app opened (file picker, browser, email), leaving from there doesn't lock until the screen turns off. There's no timeout while the app stays in front. | [4.1](04-app-lock.md#41-what-the-lock-is-and-what-it-is-not) |
 | S2 | The lock is a **UI gate only**. The Keystore vault key isn't bound to user authentication (`setUserAuthenticationRequired` isn't used). This is a design choice so that recovery works, but it means the lock adds no cryptographic protection. | [3.3](03-storage-encryption.md), [4.1](04-app-lock.md) |
-| S3 | The "Fingerprint" method accepts `BIOMETRIC_WEAK`, so a class-2 face unlock may also pass, and there is no `CryptoObject`. The UI only says "fingerprint". Not verified. | [4.2](04-app-lock.md#42-unlock-methods-and-the-2-or-more-rule) |
+| S3 | ~~`BIOMETRIC_WEAK` accepted~~ **Fixed:** only `BIOMETRIC_STRONG` (Class 3) is accepted. If strong biometrics aren't usable, the saved fingerprint method is hidden and the other ways still work. Still no `CryptoObject`, and a Class 3 face sensor would also pass while the UI says "fingerprint". | [4.2](04-app-lock.md#42-unlock-methods-and-the-2-or-more-rule) |
 | S4 | `index.json` is **plaintext**: photo names, dates, trash state and ids are readable by anyone with root or file access to the app sandbox. The image bytes themselves are encrypted. | [3](03-storage-encryption.md) |
 | S5 | The backup header (salt, iterations, count) isn't authenticated as AAD. Tampering only causes a failed read, so the impact is low. | [6.2](06-backup-restore.md#62-file-format-nytebak1) |
 | S6 | The RemoveOriginals text says "only open with your lock" even when no lock is set. | [5.4](05-import-export.md) |
@@ -18,7 +18,7 @@ pointer to the section that explains it. "Not verified" means it follows from th
 
 | # | Limitation | Where |
 |---|---|---|
-| D1 | `index.json` is written in place (`writeText`), **not atomically** (no temp file and rename), and there's no recovery path if it's corrupt. A crash or full disk during a write could lose the index, while the `.nyt` files remain but are orphaned. | [3](03-storage-encryption.md) |
+| D1 | ~~Non-atomic `index.json`~~ **Fixed:** the index is written to a temp file, fsynced and renamed, with an `index.json.bak` fallback on read. If both files are corrupt, `load()` still throws, and there's no rebuild from the `.nyt` files. | [3](03-storage-encryption.md) |
 | D2 | **Android 10 delete gap:** removing originals stops at the first `RecoverableSecurityException`. After the user consents, the delete isn't retried, and the success toast can show while photos remain. | [5.4](05-import-export.md#54-remove-or-keep-originals-removeoriginalsoverlay) |
 | D3 | The 30-day Trash purge runs only in `load()` at process start, and uses the wall clock, so changing the clock moves it. | [3](03-storage-encryption.md) |
 | D4 | `TransferService` is `START_NOT_STICKY`. If the system kills the process mid-transfer, the work stops. Photos finished so far are saved. A backup interrupted this way isn't cleaned up (`dropDocument` never runs), and the partial file has no v2 trailer, so a check or restore reports it as damaged or incomplete. | [2](02-architecture.md) |
@@ -31,7 +31,7 @@ pointer to the section that explains it. "Not verified" means it follows from th
 | # | Limitation | Where |
 |---|---|---|
 | I1 | The picker lists at most **4,000** newest photos. Older photos can't be picked. | [5.2](05-import-export.md) |
-| I2 | The picker's intro text ("…then removed from your phone gallery") predates the keep/remove choice and overstates it. | [5.2](05-import-export.md) |
+| I2 | ~~Picker intro said the photos would be removed~~ **Fixed:** it now says the user is asked whether to remove or keep the originals. | [5.2](05-import-export.md) |
 | I3 | Export always uses a `.jpg` name and `image/jpeg` MIME, even for PNG, HEIC or WebP originals. | [5.5](05-import-export.md#55-restore-to-the-device-restore--export) |
 | I4 | On Android 9 and below, export doesn't set a folder, so the files probably land in `Pictures/` rather than `Pictures/Nyte Gallery`, but the toast says the latter. Not verified. | [5.5](05-import-export.md) |
 | I5 | Only images: no video and no system Photo Picker. | [5.1](05-import-export.md) |
@@ -54,14 +54,15 @@ pointer to the section that explains it. "Not verified" means it follows from th
 |---|---|
 | C1 | `GalleryViewModel.addPicked` is unused dead code. |
 | C2 | `README.md` is in Indonesian and out of date compared with the current app. |
-| C3 | No unit or instrumented tests, and CI only runs `assembleDebug`. Good first tests would cover the backup format round-trip, `LockStore` cooldown and migration, and `VaultStore` index load and purge. |
+| C3 | No unit or instrumented tests, and CI only runs `assembleDebug` and `assembleScreenshot`. Good first tests would cover the backup format round-trip, `LockStore` cooldown and migration, and `VaultStore` index load and purge. |
 | C4 | No release signing, `isMinifyEnabled = false`, and `versionCode` is raised by hand. |
 | C5 | `GalleryScreen.kt` is very large (all main UI plus state in one file). Splitting it would make changes safer. |
 | C6 | TERMS.md §8 names Indonesian law. The owner needs to confirm this. |
 
 ## 9.6 Unclear from code alone
 
-- How `BIOMETRIC_WEAK` behaves on specific phones (S3).
+- Which phones report a Class 3 face sensor as `BIOMETRIC_STRONG` (S3).
+- Whether `BiometricPrompt` triggers `ON_STOP` on some phones. It's treated as an expected system screen either way.
 - Which MediaStore folder export uses by default on API 28 and below (I4).
 - Whether all viewers open a PNG or HEIC saved under a `.jpg` name (I3).
 - Whether CI debug keystores really differ between runs. This depends on the runner image and the cache, and it

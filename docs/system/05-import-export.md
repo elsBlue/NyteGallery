@@ -26,10 +26,8 @@ Code: `ui/DeviceImport.kt` (permissions, query, picker), `GalleryViewModel.impor
 - Queries `MediaStore.Images.Media.EXTERNAL_CONTENT_URI` for `_ID`, `DISPLAY_NAME` and `bucket_display_name`,
   sorted by `DATE_ADDED DESC`, and stops at **4,000** photos. If the bucket column isn't supported, it queries again
   without folders. Photos with no bucket are grouped under "Pictures".
-- Intro text: "Chosen photos are encrypted inside this app, kept out of other galleries, then removed from your
-  phone gallery. Android will ask you to allow that delete."
-  **(This text was written before the remove/keep choice in 5.4 and now overstates what happens. Removal is
-  optional.)**
+- Intro text: "Chosen photos are encrypted into Nyte Gallery. Afterwards you are asked whether to remove the
+  originals from your phone gallery or keep them." (Matches the remove/keep choice in 5.4.)
 - Modes:
   - **All**: one grid of every photo (`vaultGridColumns()`).
   - **Folder**: folder tiles (2 columns on phones, `Adaptive(160.dp)` otherwise) showing a cover thumbnail, the

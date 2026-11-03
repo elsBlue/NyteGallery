@@ -69,7 +69,8 @@ All Kotlin sources are under `app/src/main/java/com/nytefall/nytegallery/`. Line
 | `data/BackupPrefs.kt` | 29 | `guide_seen`, `last_backup_at`, `last_backup_photos`. |
 | `ui/GalleryViewModel.kt` | 757 | All state and long-running work: carousel rotation, rename, trash, import, removal of originals, export, backup write/verify/read, transfer progress. |
 | `ui/GalleryScreen.kt` | 2427 | The main composable: stage (carousel), grid, trash grid, full view, every overlay, back handling, permission and SAF launchers, toasts. |
-| `ui/AppLock.kt` | 1048 | `LockGate`, `LockSetupPage`, `LockChangePage`, `RecoveryCodeSettingsPage`, `RecoveryCodePage`, pattern pad, `LockConfirm`, `LockTries`. |
+| `ui/AppLock.kt` | 1048 | `LockGate`, `LockSetupPage`, `LockChangePage`, `RecoveryCodeSettingsPage`, `RecoveryCodePage`, pattern pad, `LockConfirm`, `LockTries`, strong-only biometric helpers. |
+| `ui/AutoLock.kt` | ~110 | `AutoLock` (external-screen marker, 3 s grace) and `AutoLockEffect` (lock on `ON_STOP` after the grace, and on screen off). |
 | `ui/DeviceImport.kt` | 363 | Runtime permission list per Android version, MediaStore query, the "Move into Nyte" picker (All / Folder). |
 | `ui/VaultMenu.kt` | 519 | Side menu, Backup page and first-time guide, "Backup saved" page, Restore backup page. |
 | `ui/SettingsAbout.kt` | 395 | Settings page (Recycle bin, Clear cache, lock, recovery code, backup), About page, feedback mail and policy links. |
@@ -99,7 +100,7 @@ _transfer: MutableStateFlow<TransferProgress?> ──► transfer (shown as Tran
 
 - `uiState` uses `SharingStarted.WhileSubscribed(5_000)`. `MainActivity` collects it with `collectAsState()`.
 - Every change goes through `update(id) { ... }` or replaces `all.value`, then calls `vault.save(list)`, which
-  rewrites `index.json` in place (`writeText`, not atomic; see [Limitations D1](09-limitations-todo.md)). Persistence is therefore immediate, and there is no separate save step.
+  rewrites `index.json` atomically (temp file, fsync, rename, plus an `index.json.bak`; see [Storage §3.2](03-storage-encryption.md#32-indexjson)). Persistence is therefore immediate, and there is no separate save step.
 - **Startup work in `init`** (on `Dispatchers.IO`): if a photo has `takenAt == 0`, its date is backfilled from EXIF,
   and the index is saved if anything changed. After a 2-second delay, `ensureThumb()` runs for every vault photo,
   which creates any missing v2 thumbnails.

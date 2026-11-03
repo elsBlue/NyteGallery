@@ -376,6 +376,7 @@ private fun sendFeedback(context: Context) {
         putExtra(Intent.EXTRA_SUBJECT, subject)
     }
     try {
+        AutoLock.expectExternal()
         context.startActivity(intent)
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(context, "No email app found. Write to $CONTACT_EMAIL", Toast.LENGTH_LONG).show()
@@ -386,6 +387,7 @@ private fun sendFeedback(context: Context) {
 
 private fun openLink(context: Context, url: String) {
     try {
+        AutoLock.expectExternal()
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(context, "No browser found to open this page", Toast.LENGTH_LONG).show()

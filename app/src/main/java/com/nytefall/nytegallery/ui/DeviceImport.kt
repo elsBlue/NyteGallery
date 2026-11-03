@@ -168,7 +168,7 @@ fun DeviceImportPage(
             Text("Close", color = ink.copy(alpha = 0.7f), modifier = Modifier.clickable(onClick = onClose).padding(8.dp))
         }
         Text(
-            "Chosen photos are encrypted inside this app, kept out of other galleries, then removed from your phone gallery. Android will ask you to allow that delete.",
+            "Chosen photos are encrypted into Nyte Gallery. Afterwards you are asked whether to remove the originals from your phone gallery or keep them.",
             color = ink.copy(alpha = 0.7f),
             fontSize = 13.sp,
             lineHeight = 18.sp,

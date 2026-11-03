@@ -11,6 +11,7 @@ Everything lives in app-private internal storage (`Context.filesDir`). Other app
 │   └── vault/
 │       ├── .nomedia                  # created on first use; stops media scanners
 │       ├── index.json                # PLAINTEXT list of photos (see 3.2)
+│       ├── index.json.bak            # previous good copy of index.json (fallback)
 │       ├── <uuid>.nyt                # encrypted original photo bytes
 │       ├── <uuid>.thumb2.nyt         # encrypted 384×384 JPEG thumbnail (q72)
 │       └── *.tmp                     # short-lived, written then renamed
@@ -26,7 +27,7 @@ Everything lives in app-private internal storage (`Context.filesDir`). Other app
 
 ## 3.2 `index.json`
 
-A JSON array, written with `File.writeText` on every change (`VaultStore.write`):
+A JSON array, rewritten on every change (`VaultStore.write`, then `writeIndexAtomically`):
 
 ```json
 [
@@ -47,9 +48,18 @@ A JSON array, written with `File.writeText` on every change (`VaultStore.write`)
 image bytes are encrypted. Someone with root or forensic access to the app's data could read the names and dates,
 but not the photos.
 
-The file is **not** written atomically: it is written in place, not through a temp file and rename. A crash during
-the write could in theory leave an unreadable index. **(No recovery path for a corrupt index exists in the code.
-`load()` would throw on bad JSON.)**
+**Atomic write:**
+1. The new JSON goes to `index.json.tmp` in the same folder and is flushed with `fd.sync()`.
+2. If the current `index.json` parses, it's copied to `index.json.bak` (the previous good copy).
+3. The temp file is renamed over `index.json`.
+
+A crash leaves either the old or the new index, never half of one. The format is unchanged.
+
+**Fallback on read:**
+- If `index.json` can't be read or parsed, `read()` uses `index.json.bak` and rewrites `index.json` from it. Only
+  the very last change can be lost.
+- If `index.json` is missing but `.bak` is valid, `load()` restores it first.
+- If both are bad, the read throws as before.
 
 ### Seeding and legacy names
 

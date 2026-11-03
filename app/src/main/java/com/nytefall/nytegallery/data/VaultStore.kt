@@ -35,9 +35,12 @@ class VaultStore(context: Context) {
         File(this, ".nomedia").takeIf { !it.exists() }?.createNewFile()
     }
     private val index = File(dir, "index.json")
+    // Previous good copy of index.json, used if the main file is ever unreadable.
+    private val indexBackup = File(dir, "index.json.bak")
     private val prefs = context.getSharedPreferences("nyte_gallery", Context.MODE_PRIVATE)
 
     fun load(): List<GalleryPhoto> {
+        recoverIndexIfMissing()
         purgeExpired()
         if (!index.exists()) {
             if (!prefs.getBoolean(SEEDED, false)) {
@@ -190,8 +193,28 @@ class VaultStore(context: Context) {
         if (kept.size != read().size) write(kept)
     }
 
+    /** index.json gone but its backup is there (never expected with the atomic write): bring the backup back. */
+    private fun recoverIndexIfMissing() {
+        if (index.exists() || !indexBackup.exists()) return
+        runCatching { parse(indexBackup.readText()) }.onSuccess { indexBackup.copyTo(index, overwrite = true) }
+    }
+
+    /** Reads index.json; if it can't be read or parsed, falls back to index.json.bak and repairs the main file. */
     private fun read(): List<GalleryPhoto> {
-        val array = JSONArray(index.readText())
+        val main = runCatching { parse(index.readText()) }
+        main.getOrNull()?.let { return it }
+        if (indexBackup.exists()) {
+            val previous = runCatching { parse(indexBackup.readText()) }.getOrNull()
+            if (previous != null) {
+                runCatching { writeIndexAtomically(indexBackup.readText(), keepBackup = false) }
+                return previous
+            }
+        }
+        throw main.exceptionOrNull() ?: IllegalStateException("index.json unreadable")
+    }
+
+    private fun parse(text: String): List<GalleryPhoto> {
+        val array = JSONArray(text)
         return List(array.length()) { i ->
             val item = array.getJSONObject(i)
             GalleryPhoto(
@@ -216,7 +239,32 @@ class VaultStore(context: Context) {
                     .put("takenAt", photo.takenAt),
             )
         }
-        index.writeText(array.toString())
+        writeIndexAtomically(array.toString(), keepBackup = true)
+    }
+
+    /**
+     * Writes index.json safely: the new text goes to a temp file in the same folder, is flushed to disk (fsync), and
+     * then replaces index.json with one rename, so a crash or power loss leaves either the old or the new file, never
+     * half of one. With [keepBackup] the current index.json is first copied to index.json.bak. The format is unchanged.
+     */
+    private fun writeIndexAtomically(text: String, keepBackup: Boolean) {
+        val tmp = File(dir, "index.json.tmp")
+        FileOutputStream(tmp).use { out ->
+            out.write(text.toByteArray(Charsets.UTF_8))
+            out.flush()
+            out.fd.sync()
+        }
+        if (keepBackup && index.exists() && runCatching { parse(index.readText()) }.isSuccess) {
+            runCatching { index.copyTo(indexBackup, overwrite = true) }
+        }
+        if (!tmp.renameTo(index)) {
+            // renameTo replaces the target on Android's file systems; this is only a last resort.
+            index.delete()
+            if (!tmp.renameTo(index)) {
+                tmp.inputStream().use { input -> FileOutputStream(index).use { input.copyTo(it); it.fd.sync() } }
+                tmp.delete()
+            }
+        }
     }
 
     private fun thumbFile(vaultName: String): File {

@@ -275,11 +275,19 @@ fun GalleryScreen(
         onDispose { }
     }
 
+    AutoLockEffect(
+        shouldLock = { !locked && !resettingLock && lockStore.configured() },
+        onLock = { locked = true },
+    )
+
     val chain = remember { arrayOfNulls<ActivityResultLauncher<IntentSenderRequest>>(1) }
     val deleteConsent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             when (val step = onNextDelete()) {
-                is DeleteStep.Consent -> chain[0]?.launch(IntentSenderRequest.Builder(step.sender).build())
+                is DeleteStep.Consent -> {
+                    AutoLock.expectExternal()
+                    chain[0]?.launch(IntentSenderRequest.Builder(step.sender).build())
+                }
                 DeleteStep.Done -> Toast.makeText(context, "Encrypted inside Nyte Gallery and removed from your gallery", Toast.LENGTH_LONG).show()
                 DeleteStep.Failed -> Toast.makeText(context, "Saved in Nyte Gallery, but still visible in your other gallery", Toast.LENGTH_LONG).show()
             }
@@ -293,7 +301,10 @@ fun GalleryScreen(
         originalsToAsk = 0
         onRemoveOriginals { outcome ->
             when {
-                outcome.consent != null -> deleteConsent.launch(IntentSenderRequest.Builder(outcome.consent).build())
+                outcome.consent != null -> {
+                    AutoLock.expectExternal()
+                    deleteConsent.launch(IntentSenderRequest.Builder(outcome.consent).build())
+                }
                 outcome.alreadyRemoved -> Toast.makeText(context, "Encrypted inside Nyte Gallery and removed from your gallery", Toast.LENGTH_LONG).show()
                 else -> Toast.makeText(context, "Saved in Nyte Gallery, but still visible in your other gallery", Toast.LENGTH_LONG).show()
             }
@@ -370,7 +381,12 @@ fun GalleryScreen(
         }
     }
     val openPicker = {
-        if (hasPhotoAccess(context)) choosingDevice = true else photoAccess.launch(photoPermissions())
+        if (hasPhotoAccess(context)) {
+            choosingDevice = true
+        } else {
+            AutoLock.expectExternal()
+            photoAccess.launch(photoPermissions())
+        }
     }
     val openRename = {
         val current = state.photos.getOrNull(state.activeIndex)
@@ -404,6 +420,7 @@ fun GalleryScreen(
                 ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
             if (needsPermission) {
                 pendingExportIds = ids
+                AutoLock.expectExternal()
                 writePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             } else {
                 finishExport(ids)
@@ -459,6 +476,7 @@ fun GalleryScreen(
         if (transfer != null && !askedNotify && Build.VERSION.SDK_INT >= 33) {
             askedNotify = true
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                AutoLock.expectExternal()
                 askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
@@ -969,6 +987,7 @@ fun GalleryScreen(
                 onCreate = { secret ->
                     pendingBackupPassword = secret
                     backupError = null
+                    AutoLock.expectExternal()
                     createBackupFile.launch("nyte-backup.nybak")
                 },
             )
@@ -986,6 +1005,7 @@ fun GalleryScreen(
                     pendingCheckOnly = false
                     backupError = null
                     restoreNote = null
+                    AutoLock.expectExternal()
                     openBackupFile.launch(arrayOf("application/octet-stream", "application/*", "*/*"))
                 },
                 onCheck = { secret ->
@@ -993,6 +1013,7 @@ fun GalleryScreen(
                     pendingCheckOnly = true
                     backupError = null
                     restoreNote = null
+                    AutoLock.expectExternal()
                     openBackupFile.launch(arrayOf("application/octet-stream", "application/*", "*/*"))
                 },
             )
