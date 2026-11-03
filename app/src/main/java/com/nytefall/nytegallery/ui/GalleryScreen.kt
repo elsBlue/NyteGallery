@@ -1518,7 +1518,9 @@ private fun PortraitWindow(
     modifier: Modifier = Modifier,
 ) {
     val headerColor = if (light) Paper else Color(0xFF0B0B0C)
-    val headerInk = if (light) Ink else Color(0xFFF3ECE8)
+    val headerInk = if (light) Ink else Color.White
+    val nameAlpha = if (light) 0.72f else 0.96f
+    val yearAlpha = if (light) 0.55f else 0.82f
     Column(modifier) {
         Row(
             Modifier
@@ -1537,7 +1539,7 @@ private fun PortraitWindow(
             Text(
                 text = clipName(photo.name, CARD_LIMIT),
                 modifier = Modifier.padding(start = 8.dp).weight(1f),
-                color = headerInk.copy(alpha = 0.72f),
+                color = headerInk.copy(alpha = nameAlpha),
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1546,7 +1548,7 @@ private fun PortraitWindow(
             if (year.isNotEmpty()) {
                 Text(
                     text = year,
-                    color = headerInk.copy(alpha = 0.55f),
+                    color = headerInk.copy(alpha = yearAlpha),
                     fontSize = 12.sp,
                 )
             }
