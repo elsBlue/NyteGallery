@@ -1023,20 +1023,33 @@ fun GalleryScreen(
                 }
             }
         }
-        if (onboarding && !locked) {
+        // Later and Skip fade the welcome pages out into home; Get started hands over to lock setup at once.
+        var welcomeFade by remember { mutableStateOf(false) }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = onboarding && !locked,
+            enter = androidx.compose.animation.EnterTransition.None,
+            exit = if (welcomeFade) {
+                androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(durationMillis = 420))
+            } else {
+                androidx.compose.animation.ExitTransition.None
+            },
+        ) {
             WelcomePages(
                 light = light,
                 onSkip = {
+                    welcomeFade = true
                     onboarding = false
                     onOnboardingDone()
                 },
                 onGetStarted = {
+                    welcomeFade = false
                     onboarding = false
                     onOnboardingDone()
                     // Same path as the lock button's "Continue": lock setup, then the recovery code, then locked.
                     settingLock = true
                 },
                 onLater = {
+                    welcomeFade = true
                     onboarding = false
                     onOnboardingDone()
                 },
