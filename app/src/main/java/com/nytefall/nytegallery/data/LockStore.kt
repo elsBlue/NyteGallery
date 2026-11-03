@@ -3,9 +3,17 @@ package com.nytefall.nytegallery.data
 import android.content.Context
 import android.os.SystemClock
 import android.provider.Settings
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 
 /** Result of one unlock try with a password, PIN, pattern or recovery code. */
@@ -25,9 +33,12 @@ sealed class LockCheck {
  * Older installs stored `SHA-256("<install salt>:<value>")` as 64 hex chars. Those still verify, and the first
  * successful check re-saves that secret in the PBKDF2 format, so nobody is locked out by the upgrade.
  *
- * Recovery is offline: a random 16-character recovery code, shown once, stored only as a PBKDF2 hash (same scheme).
+ * Recovery is offline: a random 16-character recovery code, stored as a PBKDF2 hash (same scheme).
  * After it is used a new one is created, which invalidates it. Older installs used an email code; that email is dropped
  * when the first recovery code is created.
+ * Until the user confirms they wrote the code down, the plain code is also kept encrypted with a non-exportable
+ * Android Keystore AES-GCM key ([PENDING]), so a relock, crash or restart shows the SAME code again instead of a
+ * new one. Confirming deletes that copy.
  *
  * Wrong tries (password, PIN, pattern and recovery code together) are counted in prefs and survive restarts.
  * From the 5th wrong try in a row a cooldown starts (see [cooldownFor]). The cooldown end is stored both as
@@ -137,19 +148,84 @@ class LockStore(context: Context) {
     fun newRecoveryCode(): String {
         val random = SecureRandom()
         val raw = String(CharArray(RECOVERY_LENGTH) { RECOVERY_ALPHABET[random.nextInt(RECOVERY_ALPHABET.length)] })
-        prefs.edit()
+        val edit = prefs.edit()
             .putString(RECOVERY, slowHash(raw))
             .putBoolean(RECOVERY_SAVED, false)
             .remove(EMAIL)
             .remove(CODE)
             .remove(CODE_AT)
-            .commit()
-        return raw.chunked(4).joinToString("-")
+        // Keep the unconfirmed code (encrypted) so it can be shown again. Without it, a new code is made next time.
+        val sealed = sealPending(raw)
+        if (sealed != null) edit.putString(PENDING, sealed) else edit.remove(PENDING)
+        edit.commit()
+        return format(raw)
     }
 
-    /** The user ticked "I have written down my recovery code". */
+    /**
+     * The code created by [newRecoveryCode] that the user hasn't confirmed yet, formatted, or null if there is none,
+     * it can't be decrypted, or it no longer matches the saved hash. Slow (PBKDF2): call off the main thread.
+     */
+    @Synchronized
+    fun pendingRecoveryCode(): String? {
+        val sealed = prefs.getString(PENDING, null) ?: return null
+        val saved = prefs.getString(RECOVERY, null)
+        val raw = openPending(sealed)
+        if (saved == null || raw == null || raw.length != RECOVERY_LENGTH || !verifySlow(saved, raw)) {
+            prefs.edit().remove(PENDING).commit()
+            return null
+        }
+        return format(raw)
+    }
+
+    /** The user ticked "I have written down my recovery code". The stored copy of the code is deleted. */
     fun markRecoverySaved() {
-        prefs.edit().putBoolean(RECOVERY_SAVED, true).commit()
+        prefs.edit().putBoolean(RECOVERY_SAVED, true).remove(PENDING).commit()
+    }
+
+    private fun format(raw: String): String = raw.chunked(4).joinToString("-")
+
+    // AES-GCM with a non-exportable Keystore key. Stored as "<iv base64>:<ciphertext base64>".
+    private fun sealPending(raw: String): String? = try {
+        val cipher = Cipher.getInstance(PENDING_TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, pendingKey())
+        val out = cipher.doFinal(raw.toByteArray(Charsets.UTF_8))
+        Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(out, Base64.NO_WRAP)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun openPending(sealed: String): String? = try {
+        val parts = sealed.split(':')
+        if (parts.size != 2) {
+            null
+        } else {
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+            val key = keyStore.getKey(PENDING_KEY_ALIAS, null) as? SecretKey
+            if (key == null) {
+                null
+            } else {
+                val cipher = Cipher.getInstance(PENDING_TRANSFORMATION)
+                cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)))
+                String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8)
+            }
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun pendingKey(): SecretKey {
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        (keyStore.getKey(PENDING_KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+        generator.init(
+            KeyGenParameterSpec.Builder(PENDING_KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .setRandomizedEncryptionRequired(true)
+                .build(),
+        )
+        return generator.generateKey()
     }
 
     /** Fingerprint passed (the system prompt limits fingerprint tries itself). Clears the counter. */
@@ -291,6 +367,11 @@ class LockStore(context: Context) {
         private const val CODE_AT = "code_at"
         private const val RECOVERY = "recovery"
         private const val RECOVERY_SAVED = "recovery_saved"
+        // Unconfirmed recovery code, AES-GCM encrypted with the Keystore key below. Deleted once confirmed.
+        private const val PENDING = "recovery_pending"
+        private const val PENDING_KEY_ALIAS = "nyte_recovery_pending"
+        private const val PENDING_TRANSFORMATION = "AES/GCM/NoPadding"
+        private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val RECOVERY_LENGTH = 16
 
         // No 0/O, 1/I/L: easy to read and copy by hand. 31 symbols x 16 is about 79 bits.

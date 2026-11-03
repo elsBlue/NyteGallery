@@ -27,6 +27,9 @@ internal object AutoLock {
     /** Time away before the app locks; covers rotation and quick activity restarts. */
     const val GRACE_MS = 3_000L
 
+    /** Longer time away while a new recovery code is on screen, so it can be copied into another app. */
+    const val RECOVERY_GRACE_MS = 60_000L
+
     // How long after an external launch an onStop still counts as caused by it.
     private const val EXTERNAL_WINDOW_MS = 5_000L
 
@@ -47,16 +50,19 @@ internal object AutoLock {
 
 /**
  * Watches the activity's lifecycle and the screen. [shouldLock] says whether locking applies now (lock set, not
- * already locked, no recovery reset in progress); [onLock] shows the lock screen.
+ * already locked, no recovery reset in progress); [onLock] shows the lock screen. [graceMs] is the time away
+ * allowed before locking, read when the app leaves the foreground. Screen off always locks at once.
  */
 @Composable
-internal fun AutoLockEffect(shouldLock: () -> Boolean, onLock: () -> Unit) {
+internal fun AutoLockEffect(shouldLock: () -> Boolean, onLock: () -> Unit, graceMs: () -> Long = { AutoLock.GRACE_MS }) {
     val host = LocalHostActivity.current ?: return
     val canLock by rememberUpdatedState(shouldLock)
     val lock by rememberUpdatedState(onLock)
+    val grace by rememberUpdatedState(graceMs)
     val scope = rememberCoroutineScope()
     DisposableEffect(host) {
         var stoppedAt = 0L
+        var stoppedGrace = AutoLock.GRACE_MS
         var stoppedForExternal = false
         var pending: Job? = null
         val observer = LifecycleEventObserver { _, event ->
@@ -65,11 +71,12 @@ internal fun AutoLockEffect(shouldLock: () -> Boolean, onLock: () -> Unit) {
                     // A configuration change recreates the activity; the new one starts locked anyway.
                     if (host.isChangingConfigurations) return@LifecycleEventObserver
                     stoppedAt = SystemClock.elapsedRealtime()
+                    stoppedGrace = grace()
                     stoppedForExternal = AutoLock.stopIsExternal()
                     if (!stoppedForExternal) {
                         pending?.cancel()
                         pending = scope.launch {
-                            delay(AutoLock.GRACE_MS)
+                            delay(stoppedGrace)
                             if (canLock()) lock()
                         }
                     }
@@ -78,7 +85,7 @@ internal fun AutoLockEffect(shouldLock: () -> Boolean, onLock: () -> Unit) {
                     pending?.cancel()
                     pending = null
                     val away = if (stoppedAt == 0L) 0L else SystemClock.elapsedRealtime() - stoppedAt
-                    if (stoppedAt != 0L && !stoppedForExternal && away >= AutoLock.GRACE_MS && canLock()) lock()
+                    if (stoppedAt != 0L && !stoppedForExternal && away >= stoppedGrace && canLock()) lock()
                     stoppedAt = 0L
                     stoppedForExternal = false
                     AutoLock.clearExternal()

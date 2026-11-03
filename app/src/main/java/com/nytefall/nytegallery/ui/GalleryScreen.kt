@@ -229,6 +229,26 @@ fun GalleryScreen(
             shownRecoveryCode = withContext(Dispatchers.Default) { lockStore.newRecoveryCode() }
         }
     }
+    // A code that was shown but never confirmed: show the SAME one again if it was kept, else make a new one.
+    fun showUnconfirmedRecoveryCode() {
+        if (makingRecovery) return
+        makingRecovery = true
+        shownRecoveryCode = null
+        recoveryNote = null
+        lockAfterRecovery = false
+        scope.launch {
+            val (code, note) = withContext(Dispatchers.Default) {
+                val pending = lockStore.pendingRecoveryCode()
+                if (pending != null) {
+                    pending to "Not confirmed yet. This is the same code as before."
+                } else {
+                    lockStore.newRecoveryCode() to "Your recovery code was not confirmed, so here is a new one. The old one no longer works."
+                }
+            }
+            recoveryNote = note
+            shownRecoveryCode = code
+        }
+    }
     var galleryOpen by remember { mutableStateOf(false) }
     var trashOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
@@ -278,6 +298,7 @@ fun GalleryScreen(
     AutoLockEffect(
         shouldLock = { !locked && !resettingLock && lockStore.configured() },
         onLock = { locked = true },
+        graceMs = { if (makingRecovery && !locked) AutoLock.RECOVERY_GRACE_MS else AutoLock.GRACE_MS },
     )
 
     val chain = remember { arrayOfNulls<ActivityResultLauncher<IntentSenderRequest>>(1) }
@@ -444,14 +465,14 @@ fun GalleryScreen(
     LaunchedEffect(locked) {
         // Lock set up before recovery codes (email), or a code that was never confirmed: make one now.
         if (!locked && !resettingLock && !makingRecovery && lockStore.needsRecoveryCode()) {
-            showNewRecoveryCode(
-                if (lockStore.hadEmailRecovery()) {
-                    "Nyte Gallery no longer uses email to recover your lock. It now uses a recovery code that never leaves this phone. Your old recovery email has been removed."
-                } else {
-                    "Your recovery code was not confirmed, so here is a new one. The old one no longer works."
-                },
-                false,
-            )
+            if (lockStore.hadEmailRecovery()) {
+                showNewRecoveryCode(
+                    "Nyte Gallery no longer uses email to recover your lock. It now uses a recovery code that never leaves this phone. Your old recovery email has been removed.",
+                    false,
+                )
+            } else {
+                showUnconfirmedRecoveryCode()
+            }
         }
         if (locked) {
             menuOpen = false
